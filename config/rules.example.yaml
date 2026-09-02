@@ -1,0 +1,47 @@
+# Coopa Trada trading rules. Copy to config/rules.yaml and tune.
+# Every value is validated on load (see coopa_trada/rules.py).
+
+# How long before the session close to place entries. The calendar service
+# turns this into an absolute instant using the real XNYS close for the day
+# (half days included) -- never a hardcoded 16:00.
+entry_minutes_before_close: 20
+
+# Exit-management window, per asset class. Each endpoint is either:
+#   - "HH:MM"  -> a wall-clock time in America/New_York on the session date, or
+#   - an int   -> that many minutes before the real session close.
+# Start and end may mix the two forms.
+exit_window:
+  SINGLE_NAME: ["15:35", 2]     # from 3:35pm ET until 2 min before the close
+  ETF:         [18, 1]          # from 18 min before close until 1 min before close
+
+# Trailing stop: exit when mid retraces this fraction from the session peak.
+trailing_stop_pct: 0.25
+
+# Hard stop: exit when mid falls this fraction below the entry price.
+hard_stop_loss_pct: 0.40
+
+# Take profit: exit when mid rises this fraction above the entry price.
+take_profit_pct: 0.60
+
+# --- Ambiguous per Cooper 9/2 -----------------------------------------------
+# His exact words: "sell if it drops 10% between the times I said." That could
+# mean 10% off the session peak (TrailingPeak) OR 10% off the entry price
+# (StopLoss). Both are wired below to their existing strategy, and both are left
+# active: CompositeExit fires the first trigger, so whichever would fire first
+# fires -- a conservative default, not a guess at his intent.
+# It is ALSO unconfirmed whether this 10% is meant to REPLACE the 25% / 40% /
+# 60% exits above; until Cooper confirms, all of these keys coexist.
+# confirm which one he means, may need to disable one.
+# Omit either key to leave that strategy unwired.
+cooper_drop_from_peak_pct: 0.10     # -> extra TrailingPeak (retrace from session peak)
+cooper_drop_from_entry_pct: 0.10    # -> extra StopLoss (drop from entry price)
+
+# Risk caps.
+max_concurrent_positions: 5
+# Per-position dollar cap. Enforced as a HARD SKIP: if one contract (mid x 100)
+# would exceed this, the ticker is skipped entirely -- not sized down.
+# confirm real number with Cooper before going live
+max_dollars_per_position: 1500
+
+# Exit loop cadence.
+poll_interval_seconds: 30

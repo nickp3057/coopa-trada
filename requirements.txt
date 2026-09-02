@@ -1,0 +1,16 @@
+# Pinned runtime dependencies. Regenerate after bumping pyproject.toml with:
+#   pip install -e . && pip freeze
+# Dev-only tooling (pytest) is not listed here; install it via: pip install -e '.[dev]'
+
+schwab-py==1.5.1
+exchange-calendars==4.13.2
+PyYAML==6.0.3
+python-dotenv==1.2.3
+
+# Transitive pins that materially affect behaviour (datetime / calendar math,
+# HTTP client used by schwab-py). Listed explicitly so a fresh install is
+# reproducible.
+pandas==3.0.5
+numpy==2.5.2
+httpx==0.28.1
+authlib==1.8.0

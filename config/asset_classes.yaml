@@ -1,0 +1,26 @@
+# Ticker -> asset class, for coopa_trada.models.CsvSignalSource.
+#
+# This file is meant to be hand-edited as Cooper's list grows. A ticker that is
+# not listed here is skipped with a logged warning (UnknownAssetClass) -- the
+# parser never guesses an asset class from a heuristic.
+#
+# single_name : ordinary single-name equities
+# etf         : ETFs / ETPs, including leveraged single-stock ETFs (e.g. TSLL)
+
+single_name:
+  - AMD
+  - SNOW
+  - DDOG
+  - PLTR
+  - TSLA
+  - AAPL
+  - GOOG
+  - NVDA
+  - MSFT
+
+etf:
+  - QQQ
+  - SPY
+  - IBIT
+  - GDX
+  - TSLL

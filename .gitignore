@@ -1,0 +1,21 @@
+# secrets / local state
+.env
+schwab_token.json
+*.db
+*.db-journal
+*.db-wal
+config/rules.yaml
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.coverage
+
+# os / editor
+.DS_Store

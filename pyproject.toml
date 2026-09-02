@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "coopa-trada"
+version = "0.1.0"
+description = "Schwab single-leg options automation skeleton (dry-run first)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [{ name = "Coopa Trada" }]
+dependencies = [
+    "schwab-py",
+    "exchange-calendars",
+    "PyYAML",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+coopa-trada = "coopa_trada.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["coopa_trada"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
