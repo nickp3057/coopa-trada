@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %} &middot; Reconcile{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Reconcile</h1>
+  <p class="hint">Compares local state against Schwab. Schwab is treated as the
+    source of truth. In DRY&#8209;RUN (no <code>LIVE_TRADING=1</code>) this is a
+    no&#8209;op that does not contact Schwab.</p>
+  <button id="btn-reconcile" class="btn btn-primary">Run reconcile</button>
+  <div id="reconcile-out" class="reconcile-out"></div>
+</section>
+{% endblock %}
+{% block script %}<script src="{{ url_for('static', filename='reconcile.js') }}"></script>{% endblock %}

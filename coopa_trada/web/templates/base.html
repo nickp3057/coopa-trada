@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coopa Trada{% block title %}{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body data-page="{{ page }}">
+  <header class="topbar">
+    <div class="brand">COOPA&nbsp;TRADA</div>
+    <div id="mode-pill" class="mode-pill mode-unknown">MODE&nbsp;&hellip;</div>
+    <nav class="nav">
+      <a href="{{ url_for('ui.index') }}" class="{{ 'active' if page == 'dashboard' }}">Dashboard</a>
+      <a href="{{ url_for('ui.settings_page') }}" class="{{ 'active' if page == 'settings' }}">Settings</a>
+      <a href="{{ url_for('ui.trades_page') }}" class="{{ 'active' if page == 'trades' }}">Trade log</a>
+      <a href="{{ url_for('ui.reconcile_page') }}" class="{{ 'active' if page == 'reconcile' }}">Reconcile</a>
+    </nav>
+  </header>
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  {% block script %}{% endblock %}
+</body>
+</html>

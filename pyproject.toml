@@ -19,9 +19,11 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest"]
+web = ["Flask"]
 
 [project.scripts]
 coopa-trada = "coopa_trada.__main__:main"
+coopa-trada-web = "coopa_trada.web.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["coopa_trada"]

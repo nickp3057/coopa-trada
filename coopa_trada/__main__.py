@@ -13,26 +13,24 @@ import argparse
 import sys
 from datetime import date
 
-from . import clock
 from .calendar_svc import CalendarService
-from .config import Mode, credentials_from_env, load_env, resolve_mode
+from .config import Mode, load_env, resolve_mode
 from .logs import banner, get_logger, setup_logging
 from .models import CsvSignalSource, UnrecognizedContractNotation
 from .rules import load_rules
+from .wiring import (
+    TokenMissing,
+    account_hash as _account_hash,
+    build_engine,
+    parse_trading_date as _parse_date,
+    schwab_client as _schwab_client,
+)
 
 DEFAULT_CONFIG = "config/rules.yaml"
 DEFAULT_SIGNALS = "data/signals.example.csv"
 DEFAULT_DB = "./trada.db"
 
-
-class TokenMissing(RuntimeError):
-    pass
-
-
-def _parse_date(value: str | None) -> date:
-    if value is None:
-        return clock.to_market(clock.now_utc()).date()
-    return date.fromisoformat(value)
+__all__ = ["TokenMissing", "build_parser", "main"]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -59,37 +57,6 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-# -- Schwab wiring (lazy; only when actually going live / hitting the chain) --
-def _schwab_client():
-    creds = credentials_from_env()
-    if not creds.token_exists():
-        raise TokenMissing(
-            f"no Schwab token at {creds.token_path}. Run the one-time interactive login "
-            f"to mint it (see README), then retry."
-        )
-    try:
-        from schwab.auth import client_from_token_file
-    except ImportError as exc:  # pragma: no cover
-        raise TokenMissing(f"schwab-py not importable: {exc}") from exc
-    return client_from_token_file(
-        token_path=str(creds.token_path),
-        api_key=creds.api_key,
-        app_secret=creds.app_secret,
-    ), creds
-
-
-def _account_hash(client, creds) -> str:
-    resp = client.get_account_numbers()
-    data = resp.json() if hasattr(resp, "json") else resp
-    entries = data if isinstance(data, list) else data.get("accountNumbers", data)
-    if creds.account_id:
-        for e in entries:
-            if str(e.get("accountNumber")) == str(creds.account_id):
-                return e["hashValue"]
-        raise SystemExit(f"account {creds.account_id} not found among Schwab accounts")
-    return entries[0]["hashValue"]
-
-
 # -- subcommands --------------------------------------------------------------
 def cmd_run(args) -> int:
     mode = resolve_mode(args.live)
@@ -98,48 +65,16 @@ def cmd_run(args) -> int:
     log = get_logger("coopa_trada.cli", mode)
 
     day = _parse_date(args.date)
-    rules = load_rules(args.config)
-    cal = CalendarService()
-    if not cal.is_trading_day(day):
+    if not CalendarService().is_trading_day(day):
         log.error("%s is not an XNYS trading day", day.isoformat())
         return 2
 
-    from .store import Store
-
-    store = Store.open(args.db)
-    source = CsvSignalSource(args.signals)
-
-    if mode is Mode.LIVE:
-        from .broker import SchwabBroker, SchwabQuoteSource
-        from .contracts import ContractResolver
-        from .ratelimit import RateLimiter
-
-        client, creds = _schwab_client()
-        rl = RateLimiter(120)
-        acct_hash = _account_hash(client, creds)
-        broker = SchwabBroker(client, acct_hash, store, rl)
-        resolver = ContractResolver(client, rl)
-        quote_source = SchwabQuoteSource(client, rl)
-    else:
-        from .broker import DryRunBroker
-        from .contracts import SyntheticResolver
-        from .engine import SyntheticQuoteSource
-
-        quote_source = SyntheticQuoteSource()
-        broker = DryRunBroker(store, quote_source)
-        resolver = SyntheticResolver()
-
-    from .engine import Engine
-
-    engine = Engine(
-        source=source,
-        resolver=resolver,
-        broker=broker,
-        store=store,
-        rules=rules,
-        cal=cal,
+    # Same dependency graph the web UI builds -- see coopa_trada/wiring.py.
+    engine, store = build_engine(
         mode=mode,
-        quote_source=quote_source,
+        signals_path=args.signals,
+        config_path=args.config,
+        db_path=args.db,
     )
     try:
         engine.run(day, once=args.once)

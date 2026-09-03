@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %} &middot; Trade log{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="row spread">
+    <h1>Trade log</h1>
+    <button id="btn-refresh" class="btn">Refresh</button>
+  </div>
+  <p class="hint">One row per position. Point&#8209;in&#8209;time snapshot of the same
+    <code>orders</code> / <code>fills</code> / <code>exit_events</code> the engine writes.</p>
+  <div id="trades-summary" class="summary"></div>
+  <div class="table-wrap">
+    <table id="trades-table">
+      <thead>
+        <tr>
+          <th>Symbol</th><th>Contract</th>
+          <th>Entry time</th><th class="num">Entry</th>
+          <th>Exit time</th><th class="num">Exit</th>
+          <th class="num">Qty</th><th class="num">P&amp;L</th>
+          <th>Exit reason</th><th>Mode</th>
+        </tr>
+      </thead>
+      <tbody><tr><td colspan="10">loading&hellip;</td></tr></tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+{% block script %}<script src="{{ url_for('static', filename='trades.js') }}"></script>{% endblock %}

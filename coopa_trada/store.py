@@ -330,6 +330,60 @@ class Store:
             """
         ).fetchall()
 
+    def position_report(self) -> list[dict]:
+        """One row per entry, joined to its exit (if any) -- the trade-log view.
+
+        Read-only. Answers, per position: what was bought, the contract, entry
+        time/price, exit time/price, realized P&L, and why it exited. Open
+        positions have ``exit_*`` fields as ``None`` and ``is_open = True``.
+        """
+        rows = self.conn.execute(
+            """
+            SELECT
+                e.signal_id          AS signal_id,
+                e.osi_symbol         AS osi_symbol,
+                e.mode               AS mode,
+                s.underlying         AS underlying,
+                ef.quantity          AS quantity,
+                ef.price             AS entry_price,
+                ef.filled_at_utc     AS entry_at_utc,
+                xf.price             AS exit_price,
+                xf.filled_at_utc     AS exit_at_utc,
+                ev.strategy          AS exit_strategy,
+                ev.reason            AS exit_reason
+            FROM orders e
+            JOIN fills ef ON ef.order_id = e.id
+            LEFT JOIN signals s ON s.id = e.signal_id
+            LEFT JOIN orders xo
+                   ON xo.intent = 'EXIT'
+                  AND xo.signal_id = e.signal_id
+                  AND xo.osi_symbol = e.osi_symbol
+            LEFT JOIN fills xf ON xf.order_id = xo.id
+            LEFT JOIN exit_events ev
+                   ON ev.position_key = (e.signal_id || ':' || e.osi_symbol)
+                  AND ev.id = (
+                        SELECT MAX(id) FROM exit_events
+                        WHERE position_key = (e.signal_id || ':' || e.osi_symbol)
+                  )
+            WHERE e.intent = 'ENTRY'
+            ORDER BY ef.id
+            """
+        ).fetchall()
+
+        out: list[dict] = []
+        for r in rows:
+            d = dict(r)
+            d["position_key"] = position_key(d["signal_id"], d["osi_symbol"])
+            d["is_open"] = d["exit_price"] is None
+            if d["exit_price"] is not None and d["entry_price"] is not None:
+                d["realized_pnl"] = round(
+                    (d["exit_price"] - d["entry_price"]) * d["quantity"] * 100, 2
+                )
+            else:
+                d["realized_pnl"] = None
+            out.append(d)
+        return out
+
     # -- transactions ---------------------------------------------
     def transaction(self):
         return _Tx(self.conn)
