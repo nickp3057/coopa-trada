@@ -26,7 +26,7 @@ from .exits import (
     update_peak,
 )
 from .logs import get_logger
-from .rules import FixedDollarSizer
+from .rules import FixedQuantitySizer
 from .store import Store, position_key
 
 __all__ = ["Engine", "SyntheticQuoteSource", "ReconcileReport"]
@@ -98,7 +98,7 @@ class Engine:
         self.cal = cal
         self.mode = mode
         self.quote_source = quote_source
-        self.sizer = sizer or FixedDollarSizer(rules.max_dollars_per_position)
+        self.sizer = sizer or FixedQuantitySizer(rules.max_dollars_per_position)
         self._now = now
         self._sleep = sleep
         self.log = get_logger("coopa_trada.engine", mode)
@@ -208,12 +208,12 @@ class Engine:
                 continue
 
             mid = contract.mid
-            # Per-position dollar cap: FixedDollarSizer returns 0 when even one
-            # contract would exceed max_dollars_per_position -- skip the ticker.
+            # Fixed quantity per pick (1). FixedQuantitySizer returns 0 when that
+            # pick's cost would exceed max_dollars_per_position -- skip the ticker.
             qty = self.sizer.size(signal, contract, self.rules)
             if qty <= 0:
                 self.log.warning(
-                    "skip %s: one contract exceeds the per-position dollar cap "
+                    "skip %s: 1 contract exceeds the per-position dollar cap "
                     "(mid=%.4f, max_dollars=%.2f)",
                     signal.id, mid, self.rules.max_dollars_per_position,
                 )

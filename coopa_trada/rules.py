@@ -7,7 +7,6 @@ The per-asset-class exit window accepts, for each endpoint, either a
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from datetime import time
 from pathlib import Path
@@ -21,7 +20,7 @@ if TYPE_CHECKING:
     from .contracts import ResolvedContract
     from .models import Signal
 
-__all__ = ["Rules", "load_rules", "PositionSizer", "FixedDollarSizer"]
+__all__ = ["Rules", "load_rules", "PositionSizer", "FixedQuantitySizer"]
 
 
 @dataclass(frozen=True)
@@ -45,25 +44,27 @@ class PositionSizer(Protocol):
         """Returns number of contracts to buy. 0 means skip."""
 
 
-class FixedDollarSizer:
-    """Per-position dollar cap, enforced as a hard skip (per Cooper).
+class FixedQuantitySizer:
+    """Always buys exactly ``quantity`` contracts (default 1) per pick.
 
-    If one contract (``contract.mid * 100``) would exceed ``dollars_per_position``,
-    return 0 -- skip the ticker entirely rather than buying fewer contracts to
-    fit. Otherwise buy as many as fit: ``floor(dollars_per_position / (mid * 100))``.
-    This is the only sizer; there is no contract-count variant.
+    ``dollars_per_position`` is a hard gate, not a sizing formula: if the cost of
+    ``quantity`` contracts exceeds it, skip the ticker entirely (return 0).
+    Otherwise return ``quantity`` unchanged -- never more, however cheap the
+    contract. This is the only sizer; there is no contract-count or per-ticker
+    quantity scheme.
     """
 
-    def __init__(self, dollars_per_position: float):
+    def __init__(self, dollars_per_position: float, quantity: int = 1):
         self.dollars_per_position = float(dollars_per_position)
+        self.quantity = int(quantity)
 
     def size(self, signal: "Signal", contract: "ResolvedContract", rules: Rules) -> int:
-        one_contract_cost = contract.mid * 100
-        if one_contract_cost <= 0:
+        if contract.mid <= 0:
             return 0
-        if one_contract_cost > self.dollars_per_position:
-            return 0  # even one contract exceeds the per-position dollar cap -> skip
-        return math.floor(self.dollars_per_position / one_contract_cost)
+        total_cost = contract.mid * 100 * self.quantity
+        if total_cost > self.dollars_per_position:
+            return 0  # one pick's worth of contracts exceeds the dollar gate -> skip
+        return self.quantity
 
 
 def _coerce_endpoint(value) -> time | int:

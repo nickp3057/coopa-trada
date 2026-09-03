@@ -134,13 +134,14 @@ LIVE_TRADING=1 python -m coopa_trada run --live --date 2026-09-02
 
 Both original questions are now **resolved**. Only a residual on each remains.
 
-1. **Position sizing — resolved: a per-position dollar cap, enforced as a hard
-   skip.** Cooper's "100 shares" was just noting that 1 contract = 100 shares —
-   there is no contract-count scheme. If one contract (`mid * 100`) would exceed
-   `max_dollars_per_position`, `FixedDollarSizer` returns `0` and the ticker is
-   **skipped entirely** — it does not buy fewer contracts to fit. `FixedDollarSizer`
-   is the only sizer. *Residual:* the cap figure in `rules.example.yaml` (1500) is
-   still a placeholder — confirm the real number with Cooper before going live.
+1. **Position sizing — resolved: always 1 contract per pick; the dollar cap is a
+   pure skip gate.** Cooper's rule is a flat "buy 1 per pick," never more.
+   `max_dollars_per_position` is a spending gate, not a sizing formula: if 1
+   contract (`mid * 100`) would cost more than it, `FixedQuantitySizer` returns
+   `0` and the ticker is **skipped entirely**; otherwise it returns `1`, however
+   cheap the contract. Only sizer; no contract-count or per-ticker quantity
+   scheme. *Residual:* the cap figure in `rules.example.yaml` (1500) is still a
+   placeholder — confirm the real number with Cooper before going live.
 
 2. **Contract notation — resolved: `{strike}{C|P}` is permanent.** It will not
    change, so there is no new parser branch. A row that fails the pattern is
@@ -168,5 +169,6 @@ Delta-based filtering logic · multi-expiration-per-list handling · any
 `SignalSource` beyond CSV · strike/expiration selection heuristics (raise
 `ContractUnderspecified`) · multi-leg / spreads · backtesting harness.
 
-Position sizing is settled (`FixedDollarSizer`, hard dollar-cap skip); there is
-no contract-count sizer, planned or otherwise.
+Position sizing is settled (`FixedQuantitySizer`: always 1 contract per pick,
+`max_dollars_per_position` a pure skip gate); there is no contract-count or
+per-ticker quantity sizer, planned or otherwise.

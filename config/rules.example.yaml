@@ -38,8 +38,9 @@ cooper_drop_from_entry_pct: 0.10    # -> extra StopLoss (drop from entry price)
 
 # Risk caps.
 max_concurrent_positions: 5
-# Per-position dollar cap. Enforced as a HARD SKIP: if one contract (mid x 100)
-# would exceed this, the ticker is skipped entirely -- not sized down.
+# Hard gate on position size: the program always buys exactly 1 contract per
+# pick. If that 1 contract would cost more than this amount, the ticker is
+# skipped entirely -- this is a spending cap, not a sizing formula.
 # confirm real number with Cooper before going live
 max_dollars_per_position: 1500
 

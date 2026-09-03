@@ -119,20 +119,31 @@ def test_rerun_once_is_idempotent_no_duplicate_orders(store, rules):
     assert len(entries) == 1
 
 
-def test_dollar_cap_sizes_down_quantity(store, rules):
-    # QQQ x999 requested; max_dollars_per_position=1500 forces a small size
-    sig = _signal("big", "QQQ", 480.0, 999, ac=AssetClass.ETF)
+def test_within_cap_buys_exactly_one_contract(store, rules):
+    # signal "quantity" is ignored now; sizer always yields 1 per pick
+    sig = _signal("fits", "QQQ", 480.0, 999, ac=AssetClass.ETF)
     now = datetime(2026, 9, 2, 18, 0, tzinfo=UTC)
     _engine(store, rules, [sig], now=now).run(DAY, once=True)
 
     entry = store.conn.execute("SELECT * FROM orders WHERE intent='ENTRY'").fetchone()
-    resolved = SyntheticResolver().resolve(sig)
-    import math
-
-    cap = math.floor(1500 / (resolved.mid * 100))
     assert entry is not None
-    assert entry["quantity"] == cap
-    assert entry["quantity"] < 999
+    assert entry["quantity"] == 1
+
+
+def test_over_cap_ticker_is_skipped_entirely(store, tmp_path):
+    # $50 cap: one synthetic contract costs ~$110+ -> gate rejects it, no order
+    p = tmp_path / "low_cap.yaml"
+    p.write_text(
+        RULES_YAML.replace("max_dollars_per_position: 1500", "max_dollars_per_position: 50"),
+        encoding="utf-8",
+    )
+    low_cap = load_rules(p)
+    sig = _signal("pricey", "QQQ", 480.0, 1, ac=AssetClass.ETF)
+    now = datetime(2026, 9, 2, 18, 0, tzinfo=UTC)
+    _engine(store, low_cap, [sig], now=now).run(DAY, once=True)
+
+    assert store.conn.execute("SELECT COUNT(*) AS c FROM orders").fetchone()["c"] == 0
+    assert not store.open_positions()
 
 
 def test_underspecified_signal_is_skipped(store, rules):
