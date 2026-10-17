@@ -57,9 +57,11 @@ delta_filter:
   min_abs_delta: 0.30     # inclusive; ignored while enabled: false
   max_abs_delta: 0.80     # inclusive; ignored while enabled: false
 
-# Shared confirmation registry. Edit these flags only in this file after
-# confirmation from Cooper. Settings preserves them and cannot dismiss badges.
-# Unconfirmed defaults produce warnings; they do not block live trading.
+# Cooper-confirmation markers. Any false marker BLOCKS live runs (dry runs are
+# never blocked); Engine.run enforces this for both the CLI and the web UI.
+# Set them here or with the Confirm checkboxes in Settings. Changing a
+# confirmed setting's value in Settings resets its marker unless the same save
+# re-confirms it.
 setting_confirmations:
   spending_cap:
     confirmed_by_cooper: false

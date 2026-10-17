@@ -9,20 +9,49 @@ const runDate = document.getElementById("run-date");
 const statusLine = document.getElementById("run-status");
 const bannerEl = document.getElementById("banner");
 const liveEnv = document.getElementById("live-env");
+const liveSettings = document.getElementById("live-settings");
 const liveError = document.getElementById("live-error");
 const tokenStatus = document.getElementById("token-status");
 const tokenReconnect = document.getElementById("token-reconnect");
 
 let confirmPhrase = "ENABLE LIVE TRADING";
+let lastStatus = null;
+
+function liveAllowed(s) {
+  return s.status !== "running" && !!s.live_env_enabled && !s.live_blocked &&
+    liveConfirm.value === confirmPhrase;
+}
+
+function renderLiveSettings(s) {
+  if (!liveSettings) return;
+  liveSettings.replaceChildren();
+  liveSettings.className = "status-line " + (s.live_blocked ? "is-error" : "ok");
+  if (s.live_block_error) {
+    liveSettings.textContent = "Live runs are blocked. " + s.live_block_error;
+    return;
+  }
+  if (!s.live_blocked) {
+    liveSettings.textContent = "All settings are confirmed with Cooper.";
+    return;
+  }
+  liveSettings.append(
+    "Live runs are blocked: these settings are not confirmed with Cooper. ",
+    CT.el("a", { href: "/settings", text: "Confirm them in Settings." }),
+  );
+  const list = CT.el("ul", { class: "live-blockers" });
+  for (const item of s.unconfirmed_settings) {
+    list.append(CT.el("li", { text: item.label + " (currently " + item.current + ")" }));
+  }
+  liveSettings.append(list);
+}
 
 function renderStatus(s) {
   const running = s.status === "running";
   btnStart.disabled = running;
   btnStop.disabled = !running;
-  if (btnStartLive) {
-    btnStartLive.disabled =
-      running || !s.live_env_enabled || liveConfirm.value !== confirmPhrase;
-  }
+  lastStatus = s;
+  if (btnStartLive) btnStartLive.disabled = !liveAllowed(s);
+  renderLiveSettings(s);
 
   let txt = running ? "RUNNING" : "idle";
   if (running && s.last_started) txt += " since " + CT.fmtTime(s.last_started);
@@ -105,7 +134,7 @@ btnStop.addEventListener("click", async () => {
 
 if (liveConfirm) {
   liveConfirm.addEventListener("input", () => {
-    if (btnStartLive) btnStartLive.disabled = liveConfirm.value !== confirmPhrase;
+    if (btnStartLive) btnStartLive.disabled = !lastStatus || !liveAllowed(lastStatus);
   });
 }
 

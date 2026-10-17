@@ -83,10 +83,83 @@ def test_get_rules_returns_current_values(client):
     assert body["trailing_stop_pct"] == 0.25
     assert body["exit_window"]["SINGLE_NAME"] == ["15:35", 2]
     assert body["warning"] is None
-    assert body["ambiguous_keys"] == [
+    assert body["stop_keys"] == [
         "cooper_drop_from_peak_pct",
         "cooper_drop_from_entry_pct",
     ]
+    assert "session peak" in body["default_stop_note"]
+    assert body["delta_filter"] == {
+        "enabled": False, "source": "schwab", "min_abs_delta": 0.30, "max_abs_delta": 0.80,
+    }
+    assert [s["key"] for s in body["default_settings"] if not s["confirmed_by_cooper"]] == [
+        "spending_cap", "ten_percent_stop", "delta_filter",
+    ]
+
+
+def _confirm(*keys):
+    return {key: {"confirmed_by_cooper": key in keys}
+            for key in ("spending_cap", "ten_percent_stop", "delta_filter")}
+
+
+def test_confirm_checkbox_persists_marker(client, paths):
+    good = client.get("/api/rules").get_json()
+    rv = client.post("/api/rules", json={**good, "setting_confirmations": _confirm("spending_cap")})
+    assert rv.status_code == 200
+    markers = load_rules(paths.config_path).setting_confirmations
+    assert markers["spending_cap"]["confirmed_by_cooper"] is True
+    assert markers["delta_filter"]["confirmed_by_cooper"] is False
+
+
+def test_changing_confirmed_value_resets_its_marker_only(client, paths):
+    good = client.get("/api/rules").get_json()
+    client.post("/api/rules", json={**good, "setting_confirmations": _confirm("spending_cap", "delta_filter")})
+    good = client.get("/api/rules").get_json()
+    rv = client.post("/api/rules", json={**good, "max_dollars_per_position": 250})
+    markers = rv.get_json()["setting_confirmations"]
+    assert markers["spending_cap"]["confirmed_by_cooper"] is False
+    assert markers["delta_filter"]["confirmed_by_cooper"] is True
+
+
+def test_value_change_with_fresh_confirmation_stays_confirmed(client):
+    good = client.get("/api/rules").get_json()
+    rv = client.post("/api/rules", json={
+        **good, "max_dollars_per_position": 250, "setting_confirmations": _confirm("spending_cap"),
+    })
+    assert rv.get_json()["setting_confirmations"]["spending_cap"]["confirmed_by_cooper"] is True
+
+
+def test_post_rules_rejects_malformed_confirmation(client, paths):
+    good = client.get("/api/rules").get_json()
+    before = open(paths.config_path).read()
+    rv = client.post("/api/rules", json={
+        **good, "setting_confirmations": {"spending_cap": {"confirmed_by_cooper": "yes"}},
+    })
+    assert rv.status_code == 400
+    assert open(paths.config_path).read() == before
+
+
+def test_delta_filter_saves_through_settings(client, paths):
+    good = client.get("/api/rules").get_json()
+    delta = {"enabled": True, "source": "tvt", "min_abs_delta": 30, "max_abs_delta": 80}
+    rv = client.post("/api/rules", json={**good, "delta_filter": delta})
+    assert rv.status_code == 200
+    loaded = load_rules(paths.config_path).delta_filter
+    assert (loaded.enabled, loaded.source, loaded.min_abs_delta, loaded.max_abs_delta) == (True, "tvt", 30, 80)
+
+
+@pytest.mark.parametrize("delta, fragment", [
+    ({"enabled": True, "source": "tvt", "min_abs_delta": 0.3, "max_abs_delta": 0.8}, "> 1.0"),
+    ({"enabled": True, "source": "schwab", "min_abs_delta": 0.8, "max_abs_delta": 0.3}, "min_abs_delta <= max_abs_delta"),
+    ({"enabled": True, "source": "bloomberg", "min_abs_delta": 0.3, "max_abs_delta": 0.8}, "source"),
+    ({"enabled": True, "source": "schwab", "min_abs_delta": None, "max_abs_delta": 0.8}, "finite number"),
+])
+def test_delta_filter_rejects_what_yaml_rejects(client, paths, delta, fragment):
+    good = client.get("/api/rules").get_json()
+    before = open(paths.config_path).read()
+    rv = client.post("/api/rules", json={**good, "delta_filter": delta})
+    assert rv.status_code == 400
+    assert fragment in rv.get_json()["error"]
+    assert open(paths.config_path).read() == before
 
 
 def test_post_rules_rejects_out_of_range(client, paths):
@@ -165,6 +238,32 @@ def test_live_start_blocked_without_env_optin(client, monkeypatch):
     )
     assert rv.status_code == 409
     assert "LIVE_TRADING" in rv.get_json()["error"]
+
+
+def test_live_start_blocked_and_listed_while_settings_unconfirmed(client, monkeypatch):
+    monkeypatch.setenv("LIVE_TRADING", "1")
+    status = client.get("/api/run/status").get_json()
+    assert status["live_blocked"] is True
+    assert [s["label"] for s in status["unconfirmed_settings"]] == [
+        "spending cap", "10% stop basis", "delta filter",
+    ]
+    assert "$1500" in status["unconfirmed_settings"][0]["current"]
+    rv = client.post(
+        "/api/run/start", json={"live": True, "confirm": "ENABLE LIVE TRADING"}
+    )
+    assert rv.status_code == 409
+    assert "unconfirmed settings" in rv.get_json()["error"]
+    assert client.get("/api/run/status").get_json()["status"] == "idle"
+
+
+def test_live_status_clears_once_all_confirmed(client):
+    good = client.get("/api/rules").get_json()
+    client.post("/api/rules", json={
+        **good, "setting_confirmations": _confirm("spending_cap", "ten_percent_stop", "delta_filter"),
+    })
+    status = client.get("/api/run/status").get_json()
+    assert status["live_blocked"] is False
+    assert status["unconfirmed_settings"] == []
 
 
 def test_double_start_is_rejected_while_running(client, monkeypatch):

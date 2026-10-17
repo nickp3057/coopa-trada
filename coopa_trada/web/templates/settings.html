@@ -39,6 +39,10 @@
 
     <fieldset class="warn-fieldset">
       <legend>Cooper 10% stop &mdash; ambiguous, pending Cooper</legend>
+      <div class="confirm-row" data-confirm-key="ten_percent_stop">
+        <span class="badge badge-warn" data-badge>Unconfirmed</span>
+        <label class="inline"><input type="checkbox" name="confirm_ten_percent_stop"> Confirmed with Cooper</label>
+      </div>
       <p class="hint" id="ambiguous-note"></p>
       <label class="block">Drop from session peak (blank = not wired)
         <input name="cooper_drop_from_peak_pct" type="number" min="0" max="0.999" step="0.01">
@@ -53,8 +57,42 @@
       <label class="block">Max concurrent positions
         <input name="max_concurrent_positions" type="number" min="1" step="1" required>
       </label>
+    </fieldset>
+
+    <fieldset class="warn-fieldset">
+      <legend>Spending cap</legend>
+      <div class="confirm-row" data-confirm-key="spending_cap">
+        <span class="badge badge-warn" data-badge>Unconfirmed</span>
+        <label class="inline"><input type="checkbox" name="confirm_spending_cap"> Confirmed with Cooper</label>
+      </div>
       <label class="block">Max dollars per position (skip gate &mdash; 1 contract per pick either way)
         <input name="max_dollars_per_position" type="number" min="0.01" step="0.01" required>
+      </label>
+      <p class="hint">A pick is skipped when one contract at the ask &times; 100 costs more than this.</p>
+    </fieldset>
+
+    <fieldset class="warn-fieldset">
+      <legend>Delta filter</legend>
+      <div class="confirm-row" data-confirm-key="delta_filter">
+        <span class="badge badge-warn" data-badge>Unconfirmed</span>
+        <label class="inline"><input type="checkbox" name="confirm_delta_filter"> Confirmed with Cooper</label>
+      </div>
+      <p class="hint">Off by default: Cooper&rsquo;s paid pick list is assumed to be screened on
+        delta already, so filtering here could discard picks. Bounds are inclusive and
+        compare the absolute delta. Schwab delta uses a 0&ndash;1 scale; TVT delta appears to
+        use 0&ndash;100, so for TVT both bounds must be above 1 (for example 30 and 80).</p>
+      <label class="inline"><input type="checkbox" name="delta_enabled"> Skip picks outside the delta band</label>
+      <label class="block">Delta column
+        <select name="delta_source">
+          <option value="schwab">Schwab delta (0&ndash;1)</option>
+          <option value="tvt">TVT delta (0&ndash;100)</option>
+        </select>
+      </label>
+      <label class="block">Minimum |delta|
+        <input name="delta_min_abs_delta" type="number" min="0" step="any" required>
+      </label>
+      <label class="block">Maximum |delta|
+        <input name="delta_max_abs_delta" type="number" min="0" step="any" required>
       </label>
     </fieldset>
 

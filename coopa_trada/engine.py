@@ -180,6 +180,11 @@ class Engine:
     # -- main loop -------------------------------------------
     def run(self, day: date, *, once: bool = False) -> None:
         if self.mode is Mode.LIVE:
+            # Enforced here, not only in the UI, so neither the CLI nor the web
+            # runner can start live trading on unconfirmed settings.
+            blocked = self.rules.live_block_reason()
+            if blocked is not None:
+                raise ValueError(blocked)
             if once:
                 raise ValueError("Live --once is disabled: orders require continuous monitoring")
             if day != clock.to_market(self._now()).date():
@@ -237,12 +242,12 @@ class Engine:
 
             mid = contract.mid
             # Fixed quantity per pick (1). FixedQuantitySizer returns 0 when that
-            # pick's cost would exceed max_dollars_per_position -- skip the ticker.
+            # pick's cost at the ask would exceed max_dollars_per_position -- skip it.
             qty = self.sizer.size(signal, contract, self.rules)
             if qty <= 0:
                 self._record_skip(signal, day, "spending_cap",
-                    f"1 contract exceeds spending cap (mid={mid:.4f}, cap={self.rules.max_dollars_per_position:.2f})",
-                    {"mid": mid, "cap": self.rules.max_dollars_per_position})
+                    f"1 contract exceeds spending cap (ask={contract.ask:.4f}, cap={self.rules.max_dollars_per_position:.2f})",
+                    {"ask": contract.ask, "mid": mid, "cap": self.rules.max_dollars_per_position})
                 continue
 
             positions = self.store.open_positions(self.mode.value)

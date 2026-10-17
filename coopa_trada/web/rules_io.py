@@ -1,4 +1,9 @@
-"""Settings serialization. Trading values are editable; confirmation markers are file-only."""
+"""Settings serialization.
+
+Trading values and Cooper-confirmation markers are both editable. Changing a
+confirmed setting's value resets its marker unless the same save re-confirms it,
+so a confirmation always refers to the value it was given for.
+"""
 from __future__ import annotations
 
 import os
@@ -9,7 +14,8 @@ from pathlib import Path
 
 import yaml
 
-from ..rules import DeltaFilter, default_settings_metadata, load_rules, setting_confirmations
+from ..rules import (SETTING_LABELS, DeltaFilter, default_settings_metadata, load_rules,
+                     setting_confirmations, unconfirmed_settings)
 
 STOP_KEYS = ("cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct")
 DEFAULT_STOP_NOTE = (
@@ -21,6 +27,12 @@ DEFAULT_STOP_NOTE = (
     "The standard 25% / 40% / 60% exits remain active alongside it: adding triggers can "
     "make an exit earlier, never later. Confirm these defaults with Cooper before a live run."
 )
+# Which rule keys each confirmation marker covers.
+CONFIRMATION_KEYS = {
+    "spending_cap": ("max_dollars_per_position",),
+    "ten_percent_stop": STOP_KEYS,
+    "delta_filter": ("delta_filter",),
+}
 SPENDING_COMMENT = """# Spending cap per pick. Always buys exactly 1 contract; if that contract
 # costs more than this, the ticker is skipped entirely.
 # DEFAULT, NOT CONFIRMED BY COOPER -- $300 is a number he mentioned once and
@@ -51,6 +63,37 @@ def _endpoint(value):
     return int(s) if re.fullmatch(r"\d+", s) else s
 
 
+def _pct_text(value) -> str:
+    return "off" if value is None else f"{float(value) * 100:g}%"
+
+
+def _describe(key: str, values: dict) -> str:
+    """The current value a confirmation marker covers, in plain words."""
+    if key == "spending_cap":
+        cap = values.get("max_dollars_per_position")
+        return f"${float(cap):g} per pick, checked against ask × 100" if cap is not None else "not set"
+    if key == "ten_percent_stop":
+        return (f"drop from peak {_pct_text(values.get('cooper_drop_from_peak_pct'))}, "
+                f"drop from entry {_pct_text(values.get('cooper_drop_from_entry_pct'))}")
+    delta = values.get("delta_filter") or {}
+    if not delta.get("enabled"):
+        return "off (picks assumed screened upstream)"
+    return f"on: |{delta.get('source')} delta| in [{delta.get('min_abs_delta'):g}, {delta.get('max_abs_delta'):g}]"
+
+
+def live_status(config_path) -> dict:
+    """Which settings still block a live run, for the dashboard."""
+    try:
+        raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
+        markers = setting_confirmations(raw.get("setting_confirmations"))
+    except (ValueError, TypeError, OSError, yaml.YAMLError) as exc:
+        return {"live_blocked": True, "unconfirmed_settings": [],
+                "live_block_error": f"Rules file cannot be read: {exc}"}
+    pending = [{"key": key, "label": SETTING_LABELS[key], "current": _describe(key, raw)}
+               for key in unconfirmed_settings(markers)]
+    return {"live_blocked": bool(pending), "unconfirmed_settings": pending, "live_block_error": None}
+
+
 def read_rules_dict(config_path) -> dict:
     path = Path(config_path)
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -61,11 +104,14 @@ def read_rules_dict(config_path) -> dict:
         warning = str(exc)
     markers = setting_confirmations(raw.get("setting_confirmations"))
     out = {key: raw.get(key) for key in (*_REQUIRED_NUMERIC, *STOP_KEYS)}
+    delta = {**asdict(DeltaFilter()), **(raw.get("delta_filter") or {})}
+    metadata = [{**item, "current": _describe(item["key"], {**raw, "delta_filter": delta})}
+                for item in default_settings_metadata(markers)]
     out.update(
         exit_window={key: [_endpoint(v) for v in pair] for key, pair in (raw.get("exit_window") or {}).items()},
-        delta_filter={**asdict(DeltaFilter()), **(raw.get("delta_filter") or {})},
+        delta_filter=delta,
         setting_confirmations=markers,
-        default_settings=default_settings_metadata(markers),
+        default_settings=metadata,
         stop_keys=list(STOP_KEYS), default_stop_note=DEFAULT_STOP_NOTE,
         warning=warning, path=str(path),
     )
@@ -109,24 +155,54 @@ def _render_yaml(body: dict) -> str:
         "cooper_drop_from_peak_pct": "\n".join("# " + line for line in [DEFAULT_STOP_NOTE]) + "\n",
         "max_dollars_per_position": SPENDING_COMMENT,
         "delta_filter": DELTA_COMMENT,
-        "setting_confirmations": "# File-only confirmation markers. Settings preserves these; the UI cannot dismiss them.\n",
+        "setting_confirmations": ("# Cooper-confirmation markers. Any false marker blocks live runs (dry runs are\n"
+                                  "# never blocked). Changing a setting's value resets its marker.\n"),
     }
-    text = "# Coopa Trada rules. Values below are adjustable; unconfirmed defaults are warnings, not live gates.\n"
+    text = "# Coopa Trada rules. Values below are adjustable; unconfirmed settings block live runs.\n"
     for key, value in body.items():
         text += comments.get(key, "")
         text += yaml.safe_dump({key: value}, sort_keys=False)
     return text
 
 
+def _covered_values(raw: dict, key: str):
+    """Normalized values a marker covers, so formatting differences are not changes."""
+    out = []
+    for name in CONFIRMATION_KEYS[key]:
+        value = raw.get(name)
+        if name == "delta_filter":
+            out.append(asdict(DeltaFilter.from_config(value)))
+        else:
+            out.append(None if value in (None, "") else float(value))
+    return out
+
+
+def _next_confirmations(current: dict, body: dict, payload: dict) -> dict:
+    before = setting_confirmations(current.get("setting_confirmations"))
+    try:
+        requested = setting_confirmations(payload.get("setting_confirmations", before))
+    except ValueError as exc:
+        raise RulesValidationError(str(exc)) from None
+    result = {}
+    for key in before:
+        was, wants = before[key]["confirmed_by_cooper"], requested[key]["confirmed_by_cooper"]
+        try:
+            changed = _covered_values(current, key) != _covered_values(body, key)
+        except (ValueError, TypeError):
+            changed = True  # the old value was unreadable; treat it as a change
+        # An untouched checkbox does not carry a confirmation over to a new value.
+        result[key] = {"confirmed_by_cooper": wants and (wants != was or not changed)}
+    return result
+
+
 def write_rules(config_path, payload: dict) -> dict:
     body = _coerce_payload(payload)
     target = Path(config_path)
     current = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
-    # Never accept marker changes through the API, even if a forged payload sends them.
-    body["setting_confirmations"] = setting_confirmations(current.get("setting_confirmations"))
     # Preserve the existing filter if an older API client omits it.
     if "delta_filter" not in payload:
         body["delta_filter"] = asdict(DeltaFilter.from_config(current.get("delta_filter")))
+    body["setting_confirmations"] = _next_confirmations(current, body, payload)
     fd, temporary = tempfile.mkstemp(dir=target.parent, suffix=".yaml")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:

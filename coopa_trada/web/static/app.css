@@ -112,6 +112,13 @@ th, td { border-bottom: 1px solid var(--line); padding: 7px 9px; text-align: lef
 th.num, td.num { text-align: right; font-variant-numeric: tabular-nums; }
 tr.open td { background: #f5f9ff; }
 .badge { background: var(--accent); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 999px; margin-left: 6px; }
+.badge-warn { background: var(--warn); }
+.badge-ok { background: var(--ok); }
+.confirm-row { display: flex; align-items: center; gap: 10px; margin: 2px 0 8px; flex-wrap: wrap; }
+.confirm-row .badge { margin-left: 0; font-size: 11px; padding: 2px 8px; }
+.msg.warn { color: var(--warn); }
+.live-blockers { margin: 6px 0; padding-left: 20px; }
+select { padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
 .pnl-pos { color: var(--ok); font-weight: 600; }
 .pnl-neg { color: var(--danger); font-weight: 600; }
 .summary { color: var(--muted); font-size: 13px; margin: 8px 0; }

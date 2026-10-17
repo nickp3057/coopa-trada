@@ -84,25 +84,20 @@ emergency sell button.
 
 ## Cooper's decisions are still required
 
-The example cap (`1500`) and exit settings are placeholders. Before live use,
-record Cooper's actual cap and selling rules. In particular, clarify whether
-“drops 10%” means from entry or from the observed high, and whether it replaces
-any of the other exit rules. The example leaves both interpretations enabled for
-simulation; live runs reject that ambiguity.
+Three settings have adjustable defaults that Cooper has not confirmed:
 
-Delta columns are recorded but no delta filter is implemented. Live runs currently
-require Cooper to confirm picks are filtered upstream:
+| Setting | Default | Key |
+|---|---|---|
+| Spending cap | `$300` per pick, checked against ask × 100 | `max_dollars_per_position` |
+| 10% stop basis | 10% drop from the session peak; drop-from-entry off | `cooper_drop_from_peak_pct`, `cooper_drop_from_entry_pct` |
+| Delta filter | off (picks assumed screened upstream) | `delta_filter` |
 
-```yaml
-# Set only after confirming the actual cap and exit settings with Cooper.
-live_rules_confirmed: true
-delta_policy: already_filtered
-```
-
-The default is `live_rules_confirmed: false` and `delta_policy: unconfirmed`.
-Saving settings in the dashboard resets confirmation, because it changes the
-reviewed rules. If Cooper needs filtering inside this app, implement his exact
-criteria before enabling live runs.
+Each has a marker under `setting_confirmations` in `config/rules.yaml`. **Any
+unconfirmed marker blocks live runs; dry runs are never blocked.** `Engine.run`
+enforces this, so it applies to the CLI and the dashboard alike. Settings shows
+an Unconfirmed badge and a Confirm checkbox for each, and the dashboard's live
+panel lists whatever is still unconfirmed. Changing a confirmed setting's value
+resets its marker unless the same save re-confirms it.
 
 ## CLI simulation
 

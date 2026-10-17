@@ -17,7 +17,7 @@ from ..models import CsvSignalSource
 from ..store import Store
 from ..wiring import TokenMissing, build_engine, token_status
 from .config import WebPaths
-from .rules_io import RulesValidationError, read_rules_dict, write_rules
+from .rules_io import RulesValidationError, live_status, read_rules_dict, write_rules
 from .runner import EngineRunner, RunnerBusy
 
 bp = Blueprint("ui", __name__)
@@ -108,6 +108,7 @@ def api_run_status():
     snap = _runner().snapshot()
     snap["live_env_enabled"] = _live_env_enabled()
     snap["live_confirm_phrase"] = LIVE_CONFIRM_PHRASE
+    snap.update(live_status(_paths().config_path))
     return jsonify(snap)
 
 
@@ -135,6 +136,13 @@ def api_run_start():
                 ),
                 409,
             )
+        # Early, readable rejection. Engine.run enforces the same gate.
+        status = live_status(_paths().config_path)
+        if status["live_blocked"]:
+            pending = "; ".join(f'{s["label"]} ({s["current"]})' for s in status["unconfirmed_settings"])
+            return jsonify(error=status["live_block_error"] or
+                           f"Live run blocked: unconfirmed settings: {pending}. Confirm them in Settings.",
+                           unconfirmed_settings=status["unconfirmed_settings"]), 409
 
     try:
         _runner().start(live=live, date_str=date_str)

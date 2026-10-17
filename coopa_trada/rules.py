@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from .contracts import ResolvedContract
     from .models import Signal
 
-__all__ = ["Rules", "load_rules", "PositionSizer", "FixedQuantitySizer", "DeltaFilter", "setting_confirmations", "default_settings_metadata"]
+__all__ = ["Rules", "load_rules", "PositionSizer", "FixedQuantitySizer", "DeltaFilter", "setting_confirmations", "default_settings_metadata", "unconfirmed_settings"]
 
 
 SETTING_LABELS = {
@@ -50,6 +50,11 @@ def setting_confirmations(raw: dict | None = None) -> dict:
 def default_settings_metadata(markers: dict) -> list[dict]:
     return [{"key": key, "label": label, **markers[key]}
             for key, label in SETTING_LABELS.items()]
+
+
+def unconfirmed_settings(markers: dict) -> list[str]:
+    """Keys still awaiting Cooper's confirmation. Any entry blocks a live run."""
+    return [key for key in SETTING_LABELS if not markers[key]["confirmed_by_cooper"]]
 
 
 @dataclass(frozen=True)
@@ -111,6 +116,15 @@ class Rules:
     cooper_drop_from_peak_pct: float | None = None
     cooper_drop_from_entry_pct: float | None = None
 
+    def live_block_reason(self) -> str | None:
+        """Why a live run must not start, or None. Dry runs ignore this."""
+        pending = unconfirmed_settings(self.setting_confirmations)
+        if not pending:
+            return None
+        labels = ", ".join(SETTING_LABELS[key] for key in pending)
+        return (f"Live run blocked: unconfirmed settings: {labels}. "
+                "Confirm each with Cooper, then tick Confirm in Settings.")
+
 
 class PositionSizer(Protocol):
     def size(self, signal: "Signal", contract: "ResolvedContract", rules: Rules) -> int:
@@ -121,7 +135,8 @@ class FixedQuantitySizer:
     """Always buys exactly ``quantity`` contracts (default 1) per pick.
 
     ``dollars_per_position`` is a hard gate, not a sizing formula: if the cost of
-    ``quantity`` contracts exceeds it, skip the ticker entirely (return 0).
+    ``quantity`` contracts at the ask (the entry limit price) exceeds it, skip the
+    ticker entirely (return 0).
     Otherwise return ``quantity`` unchanged -- never more, however cheap the
     contract. This is the only sizer; there is no contract-count or per-ticker
     quantity scheme.
@@ -132,9 +147,9 @@ class FixedQuantitySizer:
         self.quantity = int(quantity)
 
     def size(self, signal: "Signal", contract: "ResolvedContract", rules: Rules) -> int:
-        if not math.isfinite(contract.mid) or contract.mid <= 0:
+        if not math.isfinite(contract.ask) or contract.ask <= 0:
             return 0
-        total_cost = contract.mid * 100 * self.quantity
+        total_cost = contract.ask * 100 * self.quantity
         if total_cost > self.dollars_per_position:
             return 0  # one pick's worth of contracts exceeds the dollar gate -> skip
         return self.quantity
