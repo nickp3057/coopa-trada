@@ -5,8 +5,73 @@ _Last updated: 2026-10-16_
 Local Python/Flask app for Cooper's FOMC Picks, packaged as a double-click macOS
 app. CSV and macOS image upload feed an editable preview, explicit dates, and a
 separate confirmation step. Uploading or confirming a list never starts trading.
-Simulation remains the default. No real Schwab account, credentials or live
-orders have been used yet.
+Simulation remains the default. **Nick's real Schwab login has now worked once from
+source** (Reconnect Schwab → paste the redirect address → dashboard shows
+Connected). No other real Schwab call (quotes, accounts, orders) has been made, and
+no live order has ever been placed.
+
+## Session summary (2026-10-16, second session)
+
+All merged into `master` (fast-forward) and the task branches deleted.
+
+- **Login must outlast the hold:** runs refuse to start unless the Schwab login
+  lasts through the next trading day's exit window (+30 min). Checked at start and at
+  entry time; the dashboard turns red when the login won't cover the next run.
+- **Alerts:** Mac notifications (always on) and optional ntfy phone push
+  (`NTFY_TOPIC`), scrubbed of account numbers, IDs, links and dollar amounts.
+  Settings → Send test alert. Background watchdog for conditions outside a run.
+- **Keep the Mac awake:** `caffeinate -i -s` while a run is active or a live
+  position/order is open; Dashboard shows "Keeping Mac awake".
+- **`docs/SCHWAB_SETUP.md`:** Developer Portal / `.env` checklist, which login decides
+  the account, first-login walkthrough, and the points the source can't confirm.
+- **Rebuilt** `dist/Coopa Trada.app`; `packaging/verify_app.py --app` passed.
+- **Real login:** Nick's own Schwab login completed from source with
+  `python -m coopa_trada.web` and the repo-root `.env`; the token file is
+  `schwab_token.json` in the repo root (git-ignored, like `.env`).
+
+## Still untested
+
+- Real quotes, option chains and read-only account calls (`get_account_numbers`,
+  positions, orders). The login is the only real Schwab request so far.
+- Real ntfy delivery (`NTFY_TOPIC` was still empty in the repo-root `.env` at last
+  check). Tests and `verify_app.py` never call ntfy.
+- Notifications from the **packaged** app: `verify_app.py` runs alerts log-only. One
+  real `osascript` notification from source returned success; whether it displays
+  depends on macOS notification permission (it appears as Script Editor).
+- The Reconnect flow from the packaged app, order recovery, and any live order path
+  (only mocks so far). Gatekeeper on another Mac and the Windows lock code.
+- The login being refreshed automatically by schwab-py across days, and the 7-day
+  expiry (assumed from Schwab's documentation, not observed yet).
+
+## Known issues
+
+- **Half-day exit-window bug (pre-existing, not fixed):** the SINGLE_NAME window
+  starts at the wall-clock `"15:35"`, which falls after a half day's 1:00 PM close,
+  so `CalendarService.exit_window` raises "ends before it starts" and the engine fails
+  for single-name picks on half days (e.g. Fri 2026-11-27, Thu 2026-12-24). The
+  login-hold check works around it by using that day's close.
+- **Market calendar expires:** the bundled `exchange_calendars` data ends at the
+  session of **2027-10-15**. After that, `next_session` fails and every Schwab run is
+  refused until the package is updated (rebuild the app afterwards).
+- **Same-day vs next-day exits are unresolved:** the engine sells in the entry session;
+  the login check assumes a next-day hold. Needs Cooper's answer before live use.
+
+## Next steps
+
+1. **Read-only test with real quotes**, then **a dry-run day on real prices**: real
+   quotes/chains through `SchwabQuoteSource` / `ContractResolver` with simulated
+   orders (no order endpoint), watched end to end, comparing fills and exits against
+   what Schwab showed.
+2. **Linux / AWS prep:**
+   - Replace the Mac-only screenshot reader (Apple Vision) with a cross-platform OCR,
+     or rely on CSV upload there.
+   - Run as a service with automatic restart (e.g. systemd `Restart=on-failure`), with
+     the stale-lock and crash-leftover rules deciding what happens after a restart.
+   - Reach the dashboard over Tailscale instead of exposing it; it binds 127.0.0.1 and
+     has no authentication of its own. Weekly reconnect then uses the same
+     paste-the-address flow over the tailnet.
+   - Swap the macOS-only pieces (keep-awake, Mac notifications) for their server
+     equivalents (none needed / ntfy only).
 
 ## Implemented in this revision
 
@@ -34,7 +99,7 @@ orders have been used yet.
 
 ## Validation
 
-**210 automated tests pass** (`.venv/bin/python -m pytest`; `.venv` built from
+**249 automated tests pass** (210 at the start of this session) (`.venv/bin/python -m pytest`; `.venv` built from
 `requirements.txt` plus pytest). Coverage includes lifecycle, rejection, delayed
 fill, restart, mode isolation, account binding, spending cap at the ask, the live
 block per unconfirmed setting, confirmation persistence and reset, delta filter
@@ -66,8 +131,8 @@ Defaults below are in place and adjustable; each blocks live runs until confirme
 4. The questions at the end of each section of `docs/OPEN_DESIGN.md`
    (exit repricing, broker-side stops, leftovers after a crash).
 5. Read-only Schwab verification, then supervised order-lifecycle checks on a real
-   account before considering unattended operation. The reconnect flow and order
-   recovery have only run against mocks.
+   account before considering unattended operation. The login now works from source;
+   order recovery and every order path have only run against mocks.
 
 Not built yet (see `docs/OPEN_DESIGN.md`): repricing an unfilled exit, a broker-side
 protective stop, special handling for positions left over after a crash. Stop means
