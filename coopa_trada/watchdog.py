@@ -1,15 +1,19 @@
 """Background checks for the app, so problems reach a person who isn't looking.
 
-Runs once a minute inside the desktop app (and ``python -m coopa_trada.web``):
+Runs once a minute inside the desktop app (and ``python -m coopa_trada.web``),
+and straight away when a run starts or ends:
 
+* keeps the Mac awake while a run is active or a LIVE position or order is
+  open (see keepawake), and releases it when neither is true;
 * the Schwab login is expiring (under 2 days), expired, or won't last through
   the next run's hold;
 * crash recovery needs a decision: a stale lock from a LIVE run, LIVE positions
   open with no run managing them, and (on the first check after the app
   starts) orders still waiting for someone on the Reconcile page.
 
-It only reads files and the database and calls the alerter. It never trades,
-never contacts Schwab and never changes a lock.
+Apart from the keep-awake child process, it only reads files and the database
+and calls the alerter. It never trades, never contacts Schwab and never changes
+a lock.
 """
 
 from __future__ import annotations
@@ -30,11 +34,12 @@ TOKEN_ALERT_REPEAT = timedelta(hours=12)
 
 
 class Watchdog:
-    def __init__(self, paths, runner, alerter: Alerter, *, interval: float = 60.0,
+    def __init__(self, paths, runner, alerter: Alerter, *, keep_awake=None, interval: float = 60.0,
                  now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
         self.paths = paths
         self.runner = runner
         self.alerter = alerter
+        self.keep_awake = keep_awake
         self.interval = interval
         self._now = now
         self._first = True
@@ -53,6 +58,8 @@ class Watchdog:
         self._wake.set()
         if self._thread is not None:
             self._thread.join(timeout=5)
+        if self.keep_awake is not None:
+            self.keep_awake.release()
 
     def poke(self) -> None:
         """Check again now instead of at the next interval."""
@@ -66,7 +73,8 @@ class Watchdog:
 
     def tick(self) -> None:
         now = self._now()
-        checks = [self._check_token, self._check_stale_locks, self._check_leftovers]
+        checks = [self._check_keep_awake, self._check_token, self._check_stale_locks,
+                  self._check_leftovers]
         if self._first:
             checks.append(self._check_incidents)
         for check in checks:
@@ -77,6 +85,26 @@ class Watchdog:
         self._first = False
 
     # -- checks ----------------------------------------------------------------
+    def _check_keep_awake(self, now: datetime) -> None:
+        if self.keep_awake is None:
+            return
+        if self.runner is not None and self.runner.status == "running":
+            self.keep_awake.set(True, "a run is active")
+            return
+        # Only real positions and orders count: simulated ones left by a stopped
+        # practice run have nothing to protect.
+        positions, orders = self._with_store(
+            lambda s: (len(s.open_positions("LIVE")), len(s.orders_open("LIVE"))))
+        if positions or orders:
+            parts = []
+            if positions:
+                parts.append(f"{positions} real position{'s' if positions != 1 else ''} open")
+            if orders:
+                parts.append(f"{orders} real order{'s' if orders != 1 else ''} open")
+            self.keep_awake.set(True, " and ".join(parts))
+        else:
+            self.keep_awake.set(False)
+
     def _check_token(self, now: datetime) -> None:
         from .wiring import token_status
         status = token_status(now=now, config_path=self.paths.config_path)

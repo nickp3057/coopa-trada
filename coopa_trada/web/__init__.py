@@ -46,5 +46,8 @@ def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None
     if runner.alerter is None:
         runner.alerter = app.config["COOPA_ALERTER"]
     app.config["COOPA_RUNNER"] = runner
+    from ..keepawake import KeepAwake
+    # Held only once a watchdog is started (desktop app / python -m coopa_trada.web).
+    app.config["COOPA_KEEPAWAKE"] = KeepAwake()
     app.register_blueprint(bp)
     return app

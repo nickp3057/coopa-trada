@@ -108,6 +108,7 @@ def api_run_status():
     snap = _runner().snapshot()
     snap["live_env_enabled"] = _live_env_enabled()
     snap["live_confirm_phrase"] = LIVE_CONFIRM_PHRASE
+    snap["keep_awake"] = current_app.config["COOPA_KEEPAWAKE"].status()
     snap.update(live_status(_paths().config_path))
     return jsonify(snap)
 

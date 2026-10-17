@@ -74,6 +74,7 @@ function renderStatus(s) {
   statusLine.textContent = txt;
   statusLine.classList.toggle("is-error", !!s.last_error);
   statusLine.classList.toggle("is-running", running);
+  renderAwake(s.keep_awake);
 
   if (s.live_confirm_phrase) {
     confirmPhrase = s.live_confirm_phrase;
@@ -84,6 +85,19 @@ function renderStatus(s) {
       ? "LIVE_TRADING=1 is set in this environment. A live run is possible once you type the phrase."
       : "LIVE_TRADING is not set. Live runs are blocked. Start the server with LIVE_TRADING=1 to allow them.";
     liveEnv.classList.toggle("ok", !!s.live_env_enabled);
+  }
+}
+
+function renderAwake(k) {
+  const el = document.getElementById("awake-status");
+  if (!k || (!k.active && !k.error)) { el.hidden = true; return; }
+  el.hidden = false;
+  if (k.error) {
+    el.textContent = "Could not keep the Mac awake (" + k.error + "). Keep it plugged in and stop it sleeping in System Settings.";
+    el.className = "status-line is-error";
+  } else {
+    el.textContent = "Keeping Mac awake: " + k.reason + ". Keep it plugged in with the lid open.";
+    el.className = "status-line ok";
   }
 }
 

@@ -90,9 +90,14 @@ def cmd_run(args) -> int:
     except Exception as exc:
         alerts.report_failure(alerter, exc, refused=True, mode=mode.value)
         raise
+    from .keepawake import KeepAwake
+
+    awake = KeepAwake()
+    awake.set(True, "a command-line run is active")
     try:
         engine.run(day, once=args.once)  # alerts for its own refusals and errors
     finally:
+        awake.release()
         store.close()
     return 0
 

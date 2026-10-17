@@ -71,8 +71,8 @@ Defaults below are in place and adjustable; each blocks live runs until confirme
 
 Not built yet (see `docs/OPEN_DESIGN.md`): repricing an unfilled exit, a broker-side
 protective stop, special handling for positions left over after a crash. Stop means
-stop monitoring, not liquidate. The Mac must stay awake during a run; the app
-does not prevent sleep. The app is not code-signed or notarized, so Cooper has to
+stop monitoring, not liquidate. The app keeps the Mac from idle sleeping while it
+has something to watch, but closing the lid still sleeps it. The app is not code-signed or notarized, so Cooper has to
 use Open Anyway on first launch. See README for setup and operational limits.
 
 ## Schwab login status and weekly reconnect
@@ -200,3 +200,17 @@ in `.venv/lib/python3.14/site-packages/schwab/auth.py`:
 - Settings → Alerts lists the channels, has **Send test alert**, and shows recent alerts.
 - Tests replace `alerts._osascript` and `alerts._post` for every test (`tests/conftest.py`).
   No real notification or ntfy request is made by the suite.
+
+## Keeping the Mac awake
+
+- `coopa_trada/keepawake.py`: holds `caffeinate -i -s -w <app pid>` while wanted
+  (idle sleep blocked, plus system sleep on AC power; it ends with the app even after
+  a crash). Off macOS it reports an error and holds nothing.
+- The watchdog wants it while a run is active (any mode), or while any LIVE position
+  or LIVE open order exists. It releases it when neither is true. The runner pokes the
+  watchdog when a run starts or ends, so it takes effect at once. CLI `run` holds it
+  for the duration of the command.
+- Simulated positions left over from a stopped practice run do not keep the Mac awake.
+- The Dashboard shows "Keeping Mac awake: <reason>" (or the error). Closing the lid
+  still sleeps the Mac without an external display; COOPER_README explains why the Mac
+  must stay plugged in with the lid open.

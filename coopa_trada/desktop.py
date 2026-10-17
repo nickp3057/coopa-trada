@@ -160,7 +160,8 @@ def main(argv: list[str] | None = None) -> int:
     app = create_app()
     server = make_server("127.0.0.1", port, app, threaded=True)
     watchdog = Watchdog(app.config["COOPA_PATHS"], app.config["COOPA_RUNNER"],
-                        app.config["COOPA_ALERTER"]).start()
+                        app.config["COOPA_ALERTER"], keep_awake=app.config["COOPA_KEEPAWAKE"]).start()
+    app.config["COOPA_RUNNER"].on_change = watchdog.poke
     app.config["COOPA_WATCHDOG"] = watchdog
     app.config["COOPA_HOME"] = str(home)
     # Delayed so the "has quit" reply finishes sending before the server stops.

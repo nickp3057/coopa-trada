@@ -118,13 +118,27 @@ happened and where to look. The same alert is repeated at most every 6 hours
 4. **Start the run**: click **Start today's run (dry‑run)**. The bot waits until about
    20 minutes before the market closes, buys, then watches and sells according to the
    settings.
-5. **Leave the Mac awake and the app open** until the run finishes after the close.
-   If the Mac sleeps or shuts down, the bot stops watching your positions. Keep it
-   plugged in, and in **System Settings → Battery** (or **Energy**) prevent automatic
-   sleep while it runs.
+5. **Leave the Mac plugged in, lid open, and the app open** until the run finishes
+   after the close (see "Why plugged in and lid open" below).
 
 **Stop** stops the bot *watching*; it does **not** sell anything. Anything already
 bought stays in your Schwab account.
+
+#### Why plugged in and lid open
+
+The bot only sells when it is awake to see the prices. A sleeping Mac stops it
+watching, and anything it bought just sits there.
+
+- While a run is going, or while a real position or order is still open, the app
+  **stops the Mac falling asleep by itself**. The Dashboard then says **"Keeping
+  Mac awake"**. When nothing needs watching it lets the Mac sleep normally again.
+  The screen can still turn off; that's fine.
+- **Closing the lid puts the Mac to sleep anyway.** No app can stop that (unless a
+  separate monitor is plugged in). So keep the lid **open**.
+- **Plug it in.** On battery the Mac can still sleep when the battery runs low,
+  and macOS is less willing to stay awake. A dead battery stops the bot too.
+- Don't choose **Apple menu → Sleep** or **Shut Down** while the Dashboard says
+  "Keeping Mac awake".
 
 ### Real trading (only after Nick sets it up)
 
@@ -166,7 +180,8 @@ Friday morning**, then a Friday run is always covered.
 | **MODE = DRY‑RUN** (green, top bar) | Practice mode: nothing goes to Schwab | Nothing |
 | **MODE = LIVE** (red, flashing) | Real trading is switched on | Be sure you meant it |
 | **status idle** | Not running | Start a run when ready |
-| **RUNNING since …** | Working; watching prices | Keep the Mac awake |
+| **RUNNING since …** | Working; watching prices | Keep the Mac plugged in, lid open |
+| **Keeping Mac awake: …** | The app is stopping the Mac from sleeping while it has something to watch | Keep the lid open; nothing else |
 | **ERROR: …** | The last run stopped for the reason shown | Read the message; tell Nick if unclear |
 | **Schwab: Connected** | Logged in | Nothing |
 | **Schwab: Expiring soon** | Under 2 days of login left | Reconnect soon (section 4) |

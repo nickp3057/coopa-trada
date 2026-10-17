@@ -14,8 +14,11 @@ Checks:
   3. A dry run completes on synthetic data with no token.
   4. With LIVE_TRADING=1 in the .env next to the app: live refused while
      settings are unconfirmed, then refused because Schwab is not set up.
-  5. Quit works and the process exits.
-  6. (--app) the bundled picture reader runs without missing-library errors.
+  5. Alerts: Settings lists the channels (log-only here, so nothing pops up) and
+     Send test alert reports a delivery; keep-awake is reported and released
+     after the dry run.
+  6. Quit works and the process exits.
+  7. (--app) the bundled picture reader runs without missing-library errors.
 """
 
 from __future__ import annotations
@@ -153,8 +156,20 @@ def run_checks(target: str, app_path: Path | None) -> None:
                 time.sleep(0.1)
             check(run["status"] == "idle" and run["last_error"] is None and run["mode"] == "DRY-RUN",
                   f"dry run completed ({run['last_result']})")
+            for _ in range(50):  # the watchdog releases it on its own thread
+                if not run["keep_awake"]["active"]:
+                    break
+                time.sleep(0.1)
+                status, run = call(app.port, "GET", "/api/run/status")
+            check(run["keep_awake"]["active"] is False and run["keep_awake"]["error"] is None,
+                  "keep-awake released after the dry run")
             status, token = call(app.port, "GET", "/api/token")
             check(token["state"] == "not_set_up", "Schwab shows Not set up")
+            check("covers_next_run" in token, "login check covers the next run's hold")
+            status, al = call(app.port, "GET", "/api/alerts")
+            check(status == 200 and al["channels"][0]["channel"] == "Log only", "alert channels listed")
+            status, al = call(app.port, "POST", "/api/alerts/test", {})
+            check(status == 200 and al["results"][0]["ok"], "Send test alert delivers (log only)")
             if target == "app":
                 check(info["image_upload"]["available"], "picture reader available in the app")
             app.quit()

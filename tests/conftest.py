@@ -1,10 +1,36 @@
 import pytest
 
+from coopa_trada import keepawake as _keepawake
+
+REAL_SPAWN = _keepawake._spawn  # kept for the one test that checks its arguments (with Popen faked)
+
 
 @pytest.fixture(autouse=True)
 def _isolated_lock_dir(tmp_path, monkeypatch):
     """Account locks go to a per-test folder, never the real ~/.coopa_trada."""
     monkeypatch.setenv("COOPA_TRADA_LOCK_DIR", str(tmp_path / "locks"))
+
+
+class FakeCaffeinate:
+    """Stands in for the caffeinate child process."""
+
+    started: list = []
+
+    def __init__(self, pid):
+        self.pid = pid
+        self.returncode = None
+        FakeCaffeinate.started.append(self)
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        self.returncode = -15
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+    kill = terminate
 
 
 class _Outbox(list):
@@ -13,8 +39,8 @@ class _Outbox(list):
 
 @pytest.fixture(autouse=True)
 def sent_alerts(monkeypatch):
-    """No real desktop notifications or ntfy pushes in tests."""
-    from coopa_trada import alerts
+    """No real desktop notifications, ntfy pushes or caffeinate processes in tests."""
+    from coopa_trada import alerts, keepawake
 
     outbox = _Outbox()
 
@@ -29,6 +55,7 @@ def sent_alerts(monkeypatch):
 
     monkeypatch.setattr(alerts, "_osascript", fake_osascript)
     monkeypatch.setattr(alerts, "_post", fake_post)
+    monkeypatch.setattr(keepawake, "_spawn", FakeCaffeinate)
     monkeypatch.delenv("NTFY_TOPIC", raising=False)
     monkeypatch.delenv("NTFY_SERVER", raising=False)
     return outbox

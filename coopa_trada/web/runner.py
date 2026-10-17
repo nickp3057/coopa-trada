@@ -49,6 +49,8 @@ class EngineRunner:
         self._paths = paths
         self._now = now  # test hook: pins the engine clock
         self.alerter = alerter  # set by create_app when not given
+        # Called when a run starts or ends (the watchdog re-checks keep-awake).
+        self.on_change: Callable[[], None] | None = None
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -88,6 +90,14 @@ class EngineRunner:
                 target=self._run, args=(bool(live), date_str, replace(self._paths)), daemon=True
             )
             self._thread.start()
+        self._changed()
+
+    def _changed(self) -> None:
+        if self.on_change is not None:
+            try:
+                self.on_change()
+            except Exception:  # pragma: no cover - a hook must never break a run
+                pass
 
     def stop(self) -> None:
         self._stop.set()
@@ -136,3 +146,4 @@ class EngineRunner:
             self.status = "idle"
             self.last_finished = _now_iso()
             self._stop.clear()
+            self._changed()
