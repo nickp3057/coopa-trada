@@ -30,7 +30,7 @@ from .exits import (
 from .logs import get_logger
 from .rules import FixedQuantitySizer
 from .runlock import ProcessLock, account_lock_path, database_lock_path, describe
-from .schwab_token import START_MARGIN, start_block_reason
+from .schwab_token import hold_needed_until, start_block_reason
 from .store import Store, position_key
 
 __all__ = ["Engine", "SyntheticQuoteSource", "ReconcileReport"]
@@ -197,8 +197,10 @@ class Engine:
             return  # simulation with synthetic data needs no login
         if self.token_status is None:
             raise ValueError("Cannot start: this run uses Schwab but no Schwab login check is configured")
+        # Today's entries are sold during the next trading day's exit window,
+        # so the login has to last through that, not just today's session.
         reason = start_block_reason(self.token_status(self._now()),
-                                    self.cal.session_close(day) + START_MARGIN)
+                                    hold_needed_until(self.cal, self.rules, day))
         if reason is not None:
             raise ValueError(reason)
 
@@ -244,6 +246,8 @@ class Engine:
         self.log.info("entry scheduled for %s", clock.to_market(entry_time).isoformat())
         if not once:
             self._wait_until(entry_time)
+            # The login may have aged past the hold while waiting for entry time.
+            self._check_schwab_token(day)
 
         if self.mode is Mode.LIVE and self._now() >= self.cal.session_close(day):
             raise ValueError("Cannot start a live run after market close")

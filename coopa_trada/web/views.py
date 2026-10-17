@@ -143,9 +143,11 @@ def api_run_start():
             return jsonify(error=status["live_block_error"] or
                            f"Live run blocked: unconfirmed settings: {pending}. Confirm them in Settings.",
                            unconfirmed_settings=status["unconfirmed_settings"]), 409
-        token = token_status()
+        token = token_status(config_path=_paths().config_path)
         if token["state"] in ("not_set_up", "expired"):
             return jsonify(error=f'Schwab is {token["label"].lower()}. {token["message"]}'), 409
+        if not token["covers_next_run"]:
+            return jsonify(error=token["hold_message"] or "The Schwab login does not last through this run."), 409
 
     try:
         _runner().start(live=live, date_str=date_str)
@@ -292,7 +294,7 @@ def api_lock_clear():
 # -- connection status ---------------------------------------------
 @bp.get("/api/token")
 def api_token():
-    status = token_status()
+    status = token_status(config_path=_paths().config_path)
     status["reconnect_hint"] = "Click Reconnect Schwab and follow the steps."
     status["login_in_progress"] = current_app.config.get("SCHWAB_PENDING_LOGIN") is not None
     return jsonify(status)
@@ -329,7 +331,7 @@ def api_reconnect_finish():
     except LoginError as exc:
         return jsonify(error=str(exc)), 400
     current_app.config["SCHWAB_PENDING_LOGIN"] = None
-    return jsonify(token_status())
+    return jsonify(token_status(config_path=_paths().config_path))
 
 
 # -- mode banner --------------------------------------------------

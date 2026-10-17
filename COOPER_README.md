@@ -110,10 +110,15 @@ Schwab makes everyone **log in again every 7 days**. The app counts down for you
 - Under **Schwab connection**: "Login expires in 3 days 4 hr".
 - With **under 2 days left**, a yellow banner appears at the top of the Dashboard.
 - When it has expired, the banner turns red and runs will not start.
+- The login has to last until the bot has **sold** what it buys, and selling
+  happens on the **next trading day**. So a run on Friday needs the login to last
+  until Monday afternoon (longer over a holiday weekend). The Schwab card says
+  "The next run needs Schwab until …". If the login won't last that long, the banner
+  turns red even when there are still several days left, and the run won't start.
 
 Do the reconnect (section 2b, steps 1–7) **before** starting a run. It is refused
-while a run is in progress. A real-trading run also refuses to start if the login
-would run out before that day's trading is finished.
+while a run is in progress. The easy habit: **reconnect every Thursday or
+Friday morning**, then a Friday run is always covered.
 
 ---
 
@@ -129,6 +134,7 @@ would run out before that day's trading is finished.
 | **Schwab: Connected** | Logged in | Nothing |
 | **Schwab: Expiring soon** | Under 2 days of login left | Reconnect soon (section 4) |
 | **Schwab: Expired** | Login ran out | Reconnect now |
+| **Red banner: "This login runs out before the next run is finished"** | The login would lapse before the bot sells on the next trading day | Reconnect before starting the run |
 | **Schwab: Not set up** | No login saved yet, or the settings file is missing | Do section 2 |
 | **Red banner: orders need your attention** | The bot sent an order but could not confirm whether Schwab received it. It did **not** resend it, and it stopped trading that option. | Open **Reconcile**, check **Orders** in your Schwab app, then click what you found |
 | **"A previous run did not shut down cleanly"** | The app or Mac stopped during a real run | Check **Reconcile** and your Schwab positions, then click **Clear stale lock** |

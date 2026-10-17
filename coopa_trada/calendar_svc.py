@@ -79,3 +79,29 @@ class CalendarService:
         if end < start:
             raise ValueError(f"exit window for {asset_class} ends before it starts")
         return start, end
+
+    # -- holding period ---------------------------------------------------
+    def next_session(self, d: date) -> date:
+        """The first trading day strictly after ``d`` (skips weekends and holidays)."""
+        ts = self._session_ts(d + timedelta(days=1))
+        try:
+            return self.cal.date_to_session(ts, direction="next").date()
+        except Exception as exc:  # past the end of the bundled calendar
+            raise NotATradingDay(f"no {self.name} session is known after {d.isoformat()}") from exc
+
+    def next_day_exit_end(self, d: date, rules) -> datetime:
+        """The latest exit-window end, over every asset class, on the trading day after ``d``.
+
+        Positions entered on ``d`` can still be managed until then. A window that
+        does not resolve on that day (e.g. a wall-clock start after a half day's
+        close) counts as lasting until that day's close.
+        """
+        nxt = self.next_session(d)
+        close = self.session_close(nxt)
+        ends = []
+        for asset_class in getattr(rules, "exit_window", None) or {}:
+            try:
+                ends.append(self.exit_window(nxt, asset_class, rules)[1])
+            except (ValueError, TypeError, KeyError):
+                ends.append(close)
+        return max(ends, default=close)

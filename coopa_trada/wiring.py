@@ -21,7 +21,8 @@ from .config import Mode, credentials_from_env
 from .engine import Engine, SyntheticQuoteSource
 from .models import CsvSignalSource
 from .rules import load_rules
-from .schwab_token import TokenState, read_token_status, start_block_reason
+from .schwab_token import (TokenState, fmt_market, hold_needed_until, next_run_day,
+                           read_token_status, start_block_reason)
 from .store import Store
 
 __all__ = [
@@ -145,11 +146,15 @@ def build_engine(
     return engine, store
 
 
-def token_status(creds=None, now: datetime | None = None) -> dict:
+def token_status(creds=None, now: datetime | None = None, config_path: str | Path | None = None) -> dict:
     """A read-only, never-raising summary of the Schwab token file for the UI.
 
     Wraps :func:`coopa_trada.schwab_token.read_token_status`; it never
-    refreshes the token and never contacts Schwab.
+    refreshes the token and never contacts Schwab. ``covers_next_run`` says
+    whether the login lasts through the next run's hold (that day's entries
+    are sold during the following trading day's exit window); ``config_path``
+    supplies those windows. Without it, or if the rules do not load, the next
+    trading day's close stands in for the window's end.
     """
     if creds is None:
         creds = credentials_from_env()
@@ -166,4 +171,29 @@ def token_status(creds=None, now: datetime | None = None) -> dict:
                "no token file on disk" if not Path(creds.token_path).is_file() else status.message),
         app_configured=bool(creds.api_key and creds.app_secret and creds.callback_url),
     )
+    out.update(_next_run_coverage(status, config_path))
+    return out
+
+
+def _next_run_coverage(status, config_path) -> dict:
+    try:
+        cal = CalendarService()
+        try:
+            rules = load_rules(config_path) if config_path else None
+        except Exception:
+            rules = None  # the Settings page reports a broken rules file
+        day = next_run_day(cal, status.checked_at)
+        needed = hold_needed_until(cal, rules, day)
+    except Exception as exc:  # e.g. beyond the bundled calendar
+        return {"next_run_day": None, "needed_until": None, "covers_next_run": False,
+                "warning": True, "hold_message": f"Could not work out the next run's dates: {exc}"}
+    covers = start_block_reason(status, needed) is None
+    out = {"next_run_day": day.isoformat(), "needed_until": needed.isoformat(),
+           "needed_until_text": fmt_market(needed), "covers_next_run": covers, "hold_message": None}
+    if not covers and status.state in (TokenState.CONNECTED, TokenState.EXPIRING_SOON):
+        out["warning"] = True
+        out["hold_message"] = (
+            f"This login runs out before the next run ({day:%a %b} {day.day}) is finished: "
+            f"anything bought that day is sold during the following trading day's exit window, "
+            f"so Schwab is needed until {fmt_market(needed)}. Reconnect Schwab before starting it.")
     return out

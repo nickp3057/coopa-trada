@@ -82,10 +82,16 @@ use Open Anyway on first launch. See README for setup and operational limits.
   Expiring soon (< 2 days left), Expired (7 days after login), or Not set up
   (missing, damaged, legacy format without a login time, or a login time in the future).
 - Any run that touches Schwab (LIVE, or any component marked
-  `requires_schwab_token`) refuses to start unless the login lasts until 30 minutes
-  after that day's close. Simulation with synthetic data needs no token.
+  `requires_schwab_token`) refuses to start unless the login lasts through the hold:
+  until 30 minutes after the latest exit-window end on the **next** trading day
+  (`CalendarService.next_day_exit_end`, weekends and holidays skipped; a window that
+  can't resolve on a half day counts as lasting to that day's close). The check runs
+  at start and again at entry time. Simulation with synthetic data needs no token.
+  Note: the engine itself still manages exits in the *same* session (the exit windows
+  resolve on the entry date). The longer gate is deliberately conservative.
   `wiring.schwab_client` checks before schwab-py even loads the file.
-- Dashboard: status pill, countdown, warning banner under 2 days, and a
+- Dashboard: status pill, countdown, warning banner under 2 days *or* whenever the
+  login won't cover the next run's hold (red, since that run would be refused), and a
   Reconnect Schwab button (paste-the-redirect-address flow; see below). Reconnect
   is refused while a run is in progress. All of it is tested against a mocked schwab-py.
 

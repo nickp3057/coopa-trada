@@ -29,12 +29,16 @@ __all__ = [
     "TokenStatus",
     "read_token_status",
     "start_block_reason",
+    "hold_needed_until",
+    "next_run_day",
+    "fmt_market",
 ]
 
 REFRESH_TOKEN_LIFETIME = timedelta(days=7)
 # Dashboard warning threshold.
 EXPIRING_SOON = timedelta(days=2)
-# A run must keep Schwab access this long past the session close.
+# A run must keep Schwab access this long past the end of the next trading
+# day's exit window (see hold_needed_until).
 START_MARGIN = timedelta(minutes=30)
 # Tolerated clock difference for a creation time slightly in the future.
 _CLOCK_SKEW = timedelta(minutes=5)
@@ -133,16 +137,44 @@ def read_token_status(path: str | Path, now: datetime | None = None) -> TokenSta
     return TokenStatus(state, str(path), message, created_at, expires_at, now)
 
 
+def fmt_market(dt: datetime) -> str:
+    """``Mon Oct 19, 4:28 PM ET``: how deadlines are shown to a person."""
+    from .clock import to_market
+    m = to_market(dt)
+    return m.strftime("%a %b ") + str(m.day) + m.strftime(", ") + m.strftime("%I:%M %p").lstrip("0") + " ET"
+
+
+def hold_needed_until(cal, rules, day) -> datetime:
+    """When a run that enters on ``day`` last needs Schwab.
+
+    Entries go in shortly before the close and are managed through the next
+    trading day's exit window (weekends and holidays skipped), plus a margin.
+    """
+    return cal.next_day_exit_end(day, rules) + START_MARGIN
+
+
+def next_run_day(cal, now: datetime):
+    """The trading day of the next (or current) run: today until today's close, else the next session."""
+    from .clock import to_market
+    today = to_market(now).date()
+    if cal.is_trading_day(today) and now < cal.session_close(today):
+        return today
+    return cal.next_session(today)
+
+
 def start_block_reason(status: TokenStatus, needed_until: datetime) -> str | None:
     """Why a run that talks to Schwab must not start, or None.
 
-    ``needed_until`` is when the run last needs Schwab (session close plus a
-    margin): a login that lapses mid-session would leave positions unmanaged.
+    ``needed_until`` is when the run last needs Schwab (normally
+    :func:`hold_needed_until`): a login that lapses before then would leave
+    the positions bought today unmanaged.
     """
     if status.state in (TokenState.NOT_SET_UP, TokenState.EXPIRED):
         return f"Cannot start: Schwab is {status.label.lower()}. {status.message}"
     if status.expires_at is None or status.expires_at <= needed_until:
-        when = status.expires_at.isoformat() if status.expires_at else "an unknown time"
-        return ("Cannot start: the Schwab login expires at " + when + ", before this run finishes "
-                "managing positions after the market close. Click Reconnect Schwab first.")
+        when = fmt_market(status.expires_at) if status.expires_at else "an unknown time"
+        return ("Cannot start: the Schwab login expires " + when + ", before this run finishes "
+                "managing positions. Anything bought today is sold during the next trading day's "
+                "exit window, so the login must last until " + fmt_market(needed_until) +
+                ". Click Reconnect Schwab first.")
     return None

@@ -124,10 +124,16 @@ async function loadToken() {
     " The Schwab app key and secret are not in the .env file yet, so Reconnect will not work until they are.");
   tokenExpiresAt = body.expires_at ? new Date(body.expires_at) : null;
   renderCountdown();
+  if (body.needed_until_text) {
+    tokenStatus.textContent += " The next run needs Schwab until " + body.needed_until_text +
+      (body.covers_next_run ? " (covered)." : ", and this login does not last that long.");
+  }
   schwabBanner.hidden = !body.warning;
   if (body.warning) {
-    schwabBanner.className = "alert " + (body.state === "expiring_soon" ? "alert-warn" : "alert-error");
-    schwabBanner.textContent = "Schwab: " + body.label + ". " + body.message;
+    // Not lasting through the next run's hold blocks it, so it is an error, not a warning.
+    const blocking = body.state !== "connected" && body.state !== "expiring_soon" || !body.covers_next_run;
+    schwabBanner.className = "alert " + (blocking ? "alert-error" : "alert-warn");
+    schwabBanner.textContent = "Schwab: " + body.label + ". " + (body.hold_message || body.message);
   }
 }
 
