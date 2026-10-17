@@ -215,6 +215,37 @@ def api_reconcile():
     )
 
 
+# -- orders needing a person ----------------------------------------
+def _with_store(fn):
+    store = Store.open(_paths().db_path)
+    try:
+        return fn(store)
+    finally:
+        store.close()
+
+
+@bp.get("/api/attention")
+def api_attention():
+    incidents = _with_store(lambda store: store.open_incidents())
+    return jsonify(incidents=incidents)
+
+
+@bp.post("/api/attention/<int:incident_id>/resolve")
+def api_attention_resolve(incident_id: int):
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body.get("placed"), bool):
+        return jsonify(error="Say whether the order is at Schwab (placed: true or false)"), 400
+    if _runner().status == "running":
+        return jsonify(error="Stop the current run before resolving orders."), 409
+    try:
+        _with_store(lambda store: store.resolve_incident(
+            incident_id, placed=body["placed"], note=body.get("note", ""),
+            broker_order_id=body.get("broker_order_id")))
+    except ValueError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(incidents=_with_store(lambda store: store.open_incidents()))
+
+
 # -- run locks ------------------------------------------------------
 @bp.get("/api/lock")
 def api_lock():

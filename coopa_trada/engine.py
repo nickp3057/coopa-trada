@@ -15,6 +15,7 @@ from typing import Callable
 
 from . import clock
 from .config import Mode
+from .broker import OrderNotPlaced, OrderOutcomeUnknown
 from .contracts import ContractNotTradable, ContractUnderspecified
 from .exits import (
     CompositeExit,
@@ -308,9 +309,18 @@ class Engine:
                 )
                 continue
 
-            result = self.broker.place_entry(
-                contract, qty, contract.ask, signal_id=signal.id, day=day
-            )
+            if contract.osi_symbol in self.store.halted_symbols(self.mode.value):
+                self._record_skip(signal, day, "halted",
+                    f"{contract.osi_symbol} is halted: an earlier order's outcome is unknown",
+                    {"osi_symbol": contract.osi_symbol})
+                continue
+            try:
+                result = self.broker.place_entry(
+                    contract, qty, contract.ask, signal_id=signal.id, day=day
+                )
+            except (OrderNotPlaced, OrderOutcomeUnknown) as exc:
+                self.log.error("ENTRY %s: %s", signal.id, exc)
+                continue  # recorded for a person; never resubmitted
             if self.quote_source is not None and hasattr(self.quote_source, "register"):
                 self.quote_source.register(contract.osi_symbol, mid)
             self.log.info(
@@ -360,7 +370,11 @@ class Engine:
     def _exit_tick(self, day: date) -> int:
         self._sync_orders()
         acted = 0
+        halted = self.store.halted_symbols(self.mode.value)
         for state, signal_id in self._positions_state(day):
+            if state.osi_symbol in halted:
+                self.log.warning("hold %s: halted until a person resolves an unknown order", state.osi_symbol)
+                continue
             quote = self._quote(state.osi_symbol)
             update_peak(state, quote)
             self.store.update_peak(state.entry_order_id, state.session_peak_mid)
@@ -371,9 +385,13 @@ class Engine:
             decision = self.composite.check(state, quote, now)
             if decision is None:
                 continue
-            result = self.broker.place_exit(
-                state, quote.bid, decision, signal_id=signal_id, day=day
-            )
+            try:
+                result = self.broker.place_exit(
+                    state, quote.bid, decision, signal_id=signal_id, day=day
+                )
+            except (OrderNotPlaced, OrderOutcomeUnknown) as exc:
+                self.log.error("EXIT %s: %s", signal_id, exc)
+                continue  # recorded for a person; never resubmitted
             if result.deduplicated:
                 continue
             self.store.record_exit_event(
@@ -408,8 +426,8 @@ class Engine:
                 return
             if self.mode is Mode.LIVE:
                 for order in pending:
-                    if order["intent"] != "ENTRY":
-                        continue
+                    if order["intent"] != "ENTRY" or order["status"] == "UNKNOWN":
+                        continue  # an unknown order cannot be canceled; a person resolves it
                     ac = self._asset_class_for(order["signal_id"], {})
                     _, end = self.cal.exit_window(day, ac, self.rules)
                     if self._now() >= end:

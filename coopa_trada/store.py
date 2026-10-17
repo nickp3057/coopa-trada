@@ -18,7 +18,10 @@ from .idempotency import Intent
 
 __all__ = ["Store", "position_key"]
 
-_CLOSED_ORDER_STATUSES = {"FILLED", "CANCELED", "CANCELLED", "REJECTED", "REPLACED", "EXPIRED"}
+# NOT_PLACED: our submit failed and recovery confirmed Schwab never received it.
+# UNKNOWN (not closed): recovery could not tell; see order_incidents.
+_CLOSED_ORDER_STATUSES = {"FILLED", "CANCELED", "CANCELLED", "REJECTED", "REPLACED", "EXPIRED", "NOT_PLACED"}
+UNKNOWN_STATUS = "UNKNOWN"
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS signals (
@@ -125,6 +128,21 @@ class Store:
             CREATE TABLE IF NOT EXISTS position_peaks (
                 order_id INTEGER PRIMARY KEY REFERENCES orders(id),
                 peak_mid REAL NOT NULL
+            );
+            -- Submits whose outcome had to be recovered. Unresolved UNKNOWN rows
+            -- halt new orders for that contract until a person resolves them.
+            CREATE TABLE IF NOT EXISTS order_incidents (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                order_id         INTEGER NOT NULL REFERENCES orders(id),
+                mode             TEXT NOT NULL,
+                osi_symbol       TEXT NOT NULL,
+                intent           TEXT NOT NULL,
+                outcome          TEXT NOT NULL CHECK (outcome IN ('PLACED', 'NOT_PLACED', 'UNKNOWN')),
+                error            TEXT NOT NULL,
+                detail_json      TEXT,
+                created_at_utc   TEXT NOT NULL,
+                resolved_at_utc  TEXT,
+                resolution       TEXT
             );
         """)
 
@@ -431,6 +449,59 @@ class Store:
                 self.record_fill(order_id=order_id, quantity=qty, price=price,
                                  mode=order["mode"], filled_at=at, raw=raw)
             self.update_order_status(order_id, payload["status"], response=payload)
+
+    # -- order incidents -------------------------------------------------
+    def record_incident(self, *, order_id: int, outcome: str, error: str, detail: Any = None,
+                        resolution: str | None = None) -> int:
+        order = self.get_order(order_id)
+        now = _iso(clock.now_utc())
+        cur = self.conn.execute(
+            """INSERT INTO order_incidents (order_id, mode, osi_symbol, intent, outcome, error,
+                   detail_json, created_at_utc, resolved_at_utc, resolution)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (order_id, order["mode"], order["osi_symbol"], order["intent"], outcome, error,
+             _json(detail) if detail is not None else None, now,
+             now if resolution is not None else None, resolution),
+        )
+        return int(cur.lastrowid)
+
+    def open_incidents(self, mode: str | None = None) -> list[dict]:
+        """Incidents a person still has to look at, oldest first."""
+        rows = self.conn.execute(
+            """SELECT i.*, o.side, o.quantity, o.limit_price, o.signal_id, o.status AS order_status
+                 FROM order_incidents i JOIN orders o ON o.id = i.order_id
+                WHERE i.resolved_at_utc IS NULL AND (? IS NULL OR i.mode = ?) ORDER BY i.id""",
+            (mode, mode)).fetchall()
+        return [dict(r) for r in rows]
+
+    def halted_symbols(self, mode: str) -> set[str]:
+        return {r["osi_symbol"] for r in self.conn.execute(
+            "SELECT osi_symbol FROM order_incidents WHERE resolved_at_utc IS NULL AND outcome = 'UNKNOWN' AND mode = ?",
+            (mode,))}
+
+    def resolve_incident(self, incident_id: int, *, placed: bool, note: str,
+                         broker_order_id: str | None = None) -> None:
+        """Record what a person found at Schwab. ``placed`` with an order ID
+        hands the order back to normal status polling."""
+        if not note or not note.strip():
+            raise ValueError("Write a short note saying what you checked")
+        with self.transaction():
+            row = self.conn.execute("SELECT * FROM order_incidents WHERE id = ?", (incident_id,)).fetchone()
+            if row is None or row["resolved_at_utc"] is not None:
+                raise ValueError("No open incident with that ID")
+            if row["outcome"] == "UNKNOWN":
+                if placed:
+                    broker_order_id = (broker_order_id or "").strip()
+                    if not broker_order_id.isdigit():
+                        raise ValueError("Enter the Schwab order number (digits only)")
+                    self.update_order_status(row["order_id"], "WORKING", broker_order_id=broker_order_id)
+                else:
+                    self.update_order_status(row["order_id"], "NOT_PLACED")
+            elif placed:
+                raise ValueError("This order was already confirmed as not placed; acknowledge it instead")
+            self.conn.execute(
+                "UPDATE order_incidents SET resolved_at_utc = ?, resolution = ? WHERE id = ?",
+                (_iso(clock.now_utc()), ("placed: " if placed else "not placed: ") + note.strip(), incident_id))
 
     def position_report(self) -> list[dict]:
         """One row per entry, joined to its exit (if any) -- the trade-log view.

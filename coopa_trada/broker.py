@@ -6,21 +6,42 @@ Two implementations, one code path. Both write identical ``orders`` and
 and persists request then response JSON around the implementation call.
 
 Simulated fills use the submitted ask/bid. Live fills use actual broker executions.
+
+A live submit that fails without a definite answer from Schwab is never resent.
+``SchwabBroker`` looks the order up among recently entered orders instead
+(:meth:`SchwabBroker._recover`) and settles on PLACED, NOT_PLACED or UNKNOWN;
+UNKNOWN halts new orders for that contract until a person resolves it.
 """
 
 from __future__ import annotations
 
+import time as _time
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timedelta
 from typing import Any, Callable, Protocol, runtime_checkable
+
+from . import clock
 
 from .config import Mode
 from .contracts import ResolvedContract
 from .exits import ExitDecision, PositionState, Quote
 from .idempotency import Intent, make_key
-from .store import Store
+from .store import UNKNOWN_STATUS, Store
 
-__all__ = ["OrderResult", "Broker", "SchwabBroker", "DryRunBroker", "SchwabQuoteSource"]
+__all__ = ["OrderResult", "Broker", "SchwabBroker", "DryRunBroker", "SchwabQuoteSource",
+           "OrderNotPlaced", "OrderOutcomeUnknown"]
+
+
+class OrderNotPlaced(RuntimeError):
+    """The submit failed and recovery confirmed Schwab never received the order."""
+
+
+class OrderOutcomeUnknown(RuntimeError):
+    """Recovery could not tell whether Schwab received the order; contract halted."""
+
+
+class _AcceptedWithoutId(RuntimeError):
+    """Schwab answered 2xx but gave no order ID: placed, but which order?"""
 
 _OPEN_STATUS = "WORKING"
 _FILLED_STATUS = "FILLED"
@@ -73,6 +94,7 @@ class _BrokerBase:
         do_call: Callable[[], tuple[str, str | None, Any]],
         fill_price: float | None,
         entry_order_id: int | None = None,
+        recover: Callable[[int, Exception, datetime], OrderResult | None] | None = None,
     ) -> OrderResult:
         with self.store.transaction():
             legacy_key = make_key(signal_id, intent, day)
@@ -115,9 +137,15 @@ class _BrokerBase:
                 entry_order_id=entry_order_id,
             )
 
+        submitted_at = clock.now_utc()
         try:
             status, broker_order_id, response = do_call()
-        except Exception as exc:  # persist the failure, then re-raise
+        except Exception as exc:
+            # Never resubmit. An uncertain failure is looked up at the broker;
+            # anything recovery declines keeps the strict ERROR path below.
+            recovered = recover(order_id, exc, submitted_at) if recover is not None else None
+            if recovered is not None:
+                return recovered
             self.store.update_order_status(
                 order_id, "ERROR", response={"error": repr(exc)}
             )
@@ -160,12 +188,19 @@ class SchwabBroker(_BrokerBase):
     # Talks to Schwab: Engine.run refuses to start without a usable login.
     requires_schwab_token = True
 
-    def __init__(self, client, account_hash: str, store: Store, ratelimiter):
+    def __init__(self, client, account_hash: str, store: Store, ratelimiter, *,
+                 recovery_lookups: int = 3, recovery_wait_seconds: float = 5.0,
+                 sleep: Callable[[float], None] = _time.sleep):
         super().__init__(store)
         self.client = client
         self.account_hash = account_hash
         self.store.bind_live_account(account_hash)
         self.ratelimiter = ratelimiter
+        # An order can take a moment to appear in Schwab's order list, so an
+        # uncertain submit is looked up several times before giving up.
+        self.recovery_lookups = recovery_lookups
+        self.recovery_wait_seconds = recovery_wait_seconds
+        self._sleep = sleep
 
     # -- helpers -------------------------------------------------
     def _rl(self):
@@ -181,6 +216,107 @@ class SchwabBroker(_BrokerBase):
             return loc.rstrip("/").rsplit("/", 1)[-1] or None
         except Exception:
             return None
+
+    # -- uncertain-submit recovery ---------------------------------
+    @staticmethod
+    def _classify(exc: Exception) -> str | None:
+        """"rejected" (Schwab said no: keep the strict ERROR path), "not_sent"
+        (the connection never opened, so no request left this computer), or
+        "uncertain" (it may or may not have reached Schwab)."""
+        import httpx
+
+        if isinstance(exc, httpx.HTTPStatusError):
+            code = exc.response.status_code
+            return "rejected" if 400 <= code < 500 and code != 408 else "uncertain"
+        if isinstance(exc, (httpx.ConnectError, httpx.ConnectTimeout)):
+            return "not_sent"
+        return "uncertain"
+
+    def _matching_orders(self, order, submitted_at: datetime) -> list[dict]:
+        """Schwab orders entered around the submit that match it exactly and
+        are not already tracked locally."""
+        self._rl()
+        resp = self.client.get_orders_for_account(
+            self.account_hash,
+            from_entered_datetime=submitted_at - timedelta(minutes=5),
+            to_entered_datetime=clock.now_utc() + timedelta(minutes=5),
+        )
+        _check_response(resp)
+        data = resp.json()
+        orders = data if isinstance(data, list) else (data or {}).get("orders", [])
+        tracked = {str(r["broker_order_id"]) for r in self.store.conn.execute(
+            "SELECT broker_order_id FROM orders WHERE broker_order_id IS NOT NULL")}
+        matches = []
+        for o in orders:
+            legs = o.get("orderLegCollection") or []
+            if len(legs) != 1 or str(o.get("orderId")) in tracked:
+                continue
+            leg = legs[0]
+            try:
+                same = (leg.get("instrument", {}).get("symbol") == order["osi_symbol"]
+                        and leg.get("instruction") == order["side"]
+                        and float(leg.get("quantity")) == order["quantity"]
+                        and o.get("orderType") == "LIMIT"
+                        and round(float(o.get("price")), 2) == round(order["limit_price"], 2))
+            except (TypeError, ValueError):
+                same = False
+            if same:
+                matches.append(o)
+        return matches
+
+    def _recover(self, order_id: int, exc: Exception, submitted_at: datetime) -> OrderResult | None:
+        kind = "uncertain" if isinstance(exc, _AcceptedWithoutId) else self._classify(exc)
+        if kind == "rejected":
+            return None
+        order = self.store.get_order(order_id)
+        error = f"{type(exc).__name__}: {exc}"
+        attempts = 1 if kind == "not_sent" else max(1, self.recovery_lookups)
+        lookups: list[dict] = []
+        matches: list[dict] = []
+        for attempt in range(attempts):
+            if attempt:
+                self._sleep(self.recovery_wait_seconds)
+            try:
+                matches = self._matching_orders(order, submitted_at)
+            except Exception as lookup_exc:  # the lookup failing proves nothing
+                lookups.append({"attempt": attempt + 1, "error": repr(lookup_exc)})
+                kind = "uncertain"
+                continue
+            lookups.append({"attempt": attempt + 1, "matches": [str(m.get("orderId")) for m in matches]})
+            if matches:
+                break
+        detail = {"classified": kind, "lookups": lookups}
+
+        if len(matches) == 1:
+            found = matches[0]
+            broker_order_id = str(found["orderId"])
+            self.store.update_order_status(order_id, _OPEN_STATUS, broker_order_id=broker_order_id,
+                                           response={"recovered_after": error})
+            try:
+                self.store.sync_order(order_id, found)
+            except ValueError as sync_exc:  # the next status poll retries and reports it
+                detail["sync_error"] = repr(sync_exc)
+            self.store.record_incident(order_id=order_id, outcome="PLACED", error=error, detail=detail,
+                                       resolution=f"found at Schwab as order {broker_order_id}")
+            refreshed = self.store.get_order(order_id)
+            return OrderResult(
+                idempotency_key=order["idempotency_key"], broker_order_id=broker_order_id,
+                status=refreshed["status"], submitted_price=order["limit_price"], mode=self.mode.value,
+                raw_response=found, order_row_id=order_id)
+        if not matches and kind == "not_sent":
+            self.store.update_order_status(order_id, "NOT_PLACED", response={"error": error, **detail})
+            self.store.record_incident(order_id=order_id, outcome="NOT_PLACED", error=error, detail=detail)
+            raise OrderNotPlaced(
+                f"{order['side']} {order['osi_symbol']} was not placed: the connection to Schwab never "
+                f"opened ({error}). It was not resent.") from exc
+        if len(matches) > 1:
+            detail["ambiguous"] = True
+        self.store.update_order_status(order_id, "UNKNOWN", response={"error": error, **detail})
+        self.store.record_incident(order_id=order_id, outcome="UNKNOWN", error=error, detail=detail)
+        raise OrderOutcomeUnknown(
+            f"Cannot tell whether Schwab received {order['side']} {order['osi_symbol']} ({error}). "
+            f"Trading in this contract is halted until someone checks Schwab and resolves it on the "
+            f"Reconcile page.") from exc
 
     # -- Broker protocol -------------------------------------
     def place_entry(self, contract, quantity, limit_price, *, signal_id, day):
@@ -201,7 +337,7 @@ class SchwabBroker(_BrokerBase):
             _check_response(resp)
             oid = self._extract_order_id(resp)
             if not oid:
-                raise RuntimeError("Schwab accepted an order without an order ID; reconcile manually before retrying")
+                raise _AcceptedWithoutId("Schwab accepted an order without an order ID")
             return _OPEN_STATUS, oid, _response_summary(resp)
 
         return self._submit(
@@ -215,6 +351,7 @@ class SchwabBroker(_BrokerBase):
             request=request,
             do_call=do_call,
             fill_price=None,  # live fills arrive via reconcile / order status, not synthesized
+            recover=self._recover,
         )
 
     def place_exit(self, position, limit_price, decision, *, signal_id, day):
@@ -236,7 +373,7 @@ class SchwabBroker(_BrokerBase):
             _check_response(resp)
             oid = self._extract_order_id(resp)
             if not oid:
-                raise RuntimeError("Schwab accepted an order without an order ID; reconcile manually before retrying")
+                raise _AcceptedWithoutId("Schwab accepted an order without an order ID")
             return _OPEN_STATUS, oid, _response_summary(resp)
 
         return self._submit(
@@ -251,6 +388,7 @@ class SchwabBroker(_BrokerBase):
             request=request,
             do_call=do_call,
             fill_price=None,
+            recover=self._recover,
         )
 
     def cancel_entry(self, order) -> None:
@@ -264,6 +402,8 @@ class SchwabBroker(_BrokerBase):
 
     def sync_orders(self) -> None:
         for order in self.store.orders_open(self.mode.value):
+            if order["status"] == UNKNOWN_STATUS:
+                continue  # halted for a person to resolve; nothing to poll
             if not order["broker_order_id"]:
                 raise RuntimeError("Unresolved local order without broker ID; reconcile manually before trading")
             self._rl()

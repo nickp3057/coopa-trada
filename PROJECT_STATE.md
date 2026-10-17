@@ -109,3 +109,26 @@ in `.venv/lib/python3.14/site-packages/schwab/auth.py`:
   `python -m coopa_trada unlock` or the dashboard's Clear stale lock button, after
   checking the Reconcile page. A stale record from a DRY-RUN is cleared automatically.
   A lock recorded by another computer needs `--force-other-host`.
+
+## Unclear order submissions
+
+- A live submit that fails without a definite answer is never resent.
+  `SchwabBroker._recover` looks for it among orders entered around the submit
+  time (exact contract, side, quantity, LIMIT price; ignoring orders already
+  tracked locally). It looks up to 3 times, 5 seconds apart, because orders can
+  take a moment to appear.
+  - **Found exactly one:** adopted (broker ID recorded, normal polling resumes).
+    Logged as a resolved incident.
+  - **Connection never opened** (`ConnectError`/`ConnectTimeout`, so no request left)
+    and nothing found: `NOT_PLACED`. Not resent; shown for a person to acknowledge.
+  - **Anything else:** read timeouts, 5xx, a 2xx without an order ID, a failed
+    lookup, or two matching orders. Marked `UNKNOWN` and recorded in
+    `order_incidents`. New orders (entries and exits) for that contract are halted
+    until a person resolves it on the Reconcile page ("It IS in Schwab" plus the
+    order number, or "It is NOT in Schwab"). The dashboard shows a banner.
+- A definite 4xx rejection keeps the existing strict path (`ERROR`, re-raised,
+  polling blocked until someone reconciles manually).
+- A recovered failure no longer aborts the run: other picks and positions keep
+  being managed. An unresolved unknown order still keeps the day from finishing
+  cleanly (it raises at the close), and if the order later shows up at Schwab,
+  the next start's reconcile reports it as an untracked divergence and refuses to trade.

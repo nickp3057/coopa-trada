@@ -1,6 +1,13 @@
 {% extends "base.html" %}
 {% block title %} &middot; Reconcile{% endblock %}
 {% block content %}
+<section class="card danger" id="attention-card" hidden>
+  <h1>Orders that need your attention</h1>
+  <p class="hint">The bot could not confirm these orders with Schwab and did <strong>not</strong>
+    resend them. For each one, look at Orders in your Schwab account (app or website), then
+    record what you found. A contract marked &ldquo;outcome unknown&rdquo; stays halted until you do.</p>
+  <div id="attention-list"></div>
+</section>
 <section class="card">
   <h1>Reconcile</h1>
   <p class="hint">Compares local state against Schwab. Schwab is treated as the

@@ -160,6 +160,20 @@ document.getElementById("btn-reconnect-finish").addEventListener("click", async 
   loadToken();
 });
 
+async function loadAttention() {
+  const banner = document.getElementById("attention-banner");
+  const { ok, body } = await CT.get("/api/attention");
+  if (!ok) return;
+  const n = body.incidents.length;
+  banner.hidden = n === 0;
+  if (!n) return;
+  const halted = body.incidents.filter((i) => i.outcome === "UNKNOWN").map((i) => i.osi_symbol);
+  banner.replaceChildren(
+    `${n} order${n === 1 ? "" : "s"} need${n === 1 ? "s" : ""} your attention` +
+      (halted.length ? ` (halted: ${halted.join(", ")})` : "") + ". ",
+    CT.el("a", { href: "/reconcile", text: "Review on the Reconcile page." }));
+}
+
 async function loadLocks() {
   const { ok, body } = await CT.get("/api/lock");
   if (!ok) return;
@@ -216,7 +230,9 @@ if (btnStartLive) {
 loadBanner();
 loadToken();
 loadLocks();
+loadAttention();
 pollStatus();
+setInterval(loadAttention, 15000);
 setInterval(loadLocks, 15000);
 setInterval(pollStatus, 3000);
 setInterval(loadToken, 60000);

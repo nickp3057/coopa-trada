@@ -138,3 +138,6 @@ code { background: #eceef1; padding: 1px 4px; border-radius: 4px; font-size: 0.9
 .steps { padding-left: 20px; }
 .steps li { margin: 6px 0; }
 #reconnect-url { width: 100%; }
+.incident { border-top: 1px solid var(--line); padding: 10px 0; }
+.incident-title { font-weight: 600; margin: 0 0 4px; }
+.incident input[type="text"] { min-width: 220px; }
