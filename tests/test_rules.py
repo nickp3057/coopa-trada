@@ -12,7 +12,7 @@ from coopa_trada.rules import FixedQuantitySizer
 
 def _contract(mid):
     # FixedQuantitySizer.size only reads contract.mid
-    return SimpleNamespace(mid=mid)
+    return SimpleNamespace(mid=mid, ask=mid)
 
 
 def test_skips_entirely_when_one_contract_exceeds_cap():

@@ -7,14 +7,14 @@ is ``{strike}{C|P}`` (e.g. ``44P``); a row that does not match is skipped with a
 warning rather than guessed at. Asset class comes from an explicit hand-edited
 lookup (``config/asset_classes.yaml``), never a heuristic.
 
-Two inputs from Cooper are still pending (see README, "Pending confirmation from
-Cooper"): position sizing (per-dollar vs per-contract-count) and confirmation
-that ``OPTION`` is always ``{strike}{C|P}``. Neither is guessed here.
+Contract notation and one-contract sizing are settled. The spending cap, exit
+interpretation, and delta policy still require Cooper's confirmation (see README).
 """
 
 from __future__ import annotations
 
 import csv
+import math
 import logging
 import re
 from abc import ABC, abstractmethod
@@ -186,7 +186,10 @@ _REQUIRED_COLS = (_COL_SYMBOL, _COL_OPTION, _COL_LAST_PRICE)
 
 def _opt_float(value: str | None) -> float | None:
     value = (value or "").strip()
-    return float(value) if value else None
+    result = float(value) if value else None
+    if result is not None and not math.isfinite(result):
+        raise ValueError("numeric cells must be finite")
+    return result
 
 
 def _resolve_year(month: int, day_: int, ref: date) -> date:
@@ -218,7 +221,7 @@ class CsvSignalSource(SignalSource):
     - ``LAST PRICE`` -> ``reference_price``; ``TVT-DELTA`` / ``SCHWAB DELTA`` ->
       ``signal_delta_tvt`` / ``signal_delta_schwab`` (recorded, unused).
     - ``quantity`` is set to 0: the list carries no size column and sizing is
-      delegated to ``rules.PositionSizer`` pending Cooper's answer.
+      delegated to ``rules.FixedQuantitySizer``.
     """
 
     def __init__(
@@ -272,6 +275,12 @@ class CsvSignalSource(SignalSource):
 
     # -- header ---------------------------------------------------------
     def _parse_header(self, text: str, ref: date) -> tuple[date, date]:
+        explicit = re.search(r"Trade date: (\d{4}-\d{2}-\d{2}); Expiration: (\d{4}-\d{2}-\d{2})", text)
+        if explicit:
+            listed, expiration = (date.fromisoformat(v) for v in explicit.groups())
+            if expiration < listed:
+                raise ValueError("expiration precedes trade date")
+            return listed, expiration
         for line in text.splitlines():
             m = _HEADER_FULL_RE.search(line)
             if m:
@@ -345,6 +354,8 @@ class CsvSignalSource(SignalSource):
         if not m:
             raise UnrecognizedContractNotation(raw_row)
         strike = float(m.group(1))
+        if not math.isfinite(strike) or strike <= 0:
+            raise ValueError("strike must be positive and finite")
         right = Right.CALL if m.group(2).upper() == "C" else Right.PUT
 
         try:
@@ -358,7 +369,7 @@ class CsvSignalSource(SignalSource):
             right=right,
             strike=strike,
             expiration=expiration,
-            quantity=0,  # no size column; PositionSizer decides (pending Cooper)
+            quantity=0,  # no size column; FixedQuantitySizer supplies one contract
             asset_class=asset_class,
             received_at=received_at,
             raw=raw_row,

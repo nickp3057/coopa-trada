@@ -23,26 +23,47 @@ hard_stop_loss_pct: 0.40
 # Take profit: exit when mid rises this fraction above the entry price.
 take_profit_pct: 0.60
 
-# --- Ambiguous per Cooper 9/2 -----------------------------------------------
-# His exact words: "sell if it drops 10% between the times I said." That could
-# mean 10% off the session peak (TrailingPeak) OR 10% off the entry price
-# (StopLoss). Both are wired below to their existing strategy, and both are left
-# active: CompositeExit fires the first trigger, so whichever would fire first
-# fires -- a conservative default, not a guess at his intent.
-# It is ALSO unconfirmed whether this 10% is meant to REPLACE the 25% / 40% /
-# 60% exits above; until Cooper confirms, all of these keys coexist.
-# confirm which one he means, may need to disable one.
-# Omit either key to leave that strategy unwired.
-cooper_drop_from_peak_pct: 0.10     # -> extra TrailingPeak (retrace from session peak)
-cooper_drop_from_entry_pct: 0.10    # -> extra StopLoss (drop from entry price)
+# DEFAULT, NOT CONFIRMED BY COOPER: peak is the better reading of his wording
+# ("exit at the high", "drops 10% between the times I said"). The observed session
+# peak is always >= entry, so a 10% retrace triggers at a higher price when the
+# peak exceeds entry: it is the earlier, tighter of the two readings.
+# Both fields remain editable. Blank = not wired. If both are set, both are
+# active and the first trigger wins. Keep the standard 25% / 40% / 60% exits
+# alongside these: additional triggers can make an exit earlier, never later.
+cooper_drop_from_peak_pct: 0.10    # DEFAULT, NOT CONFIRMED
+cooper_drop_from_entry_pct:        # blank = not wired
 
 # Risk caps.
 max_concurrent_positions: 5
-# Hard gate on position size: the program always buys exactly 1 contract per
-# pick. If that 1 contract would cost more than this amount, the ticker is
-# skipped entirely -- this is a spending cap, not a sizing formula.
-# confirm real number with Cooper before going live
-max_dollars_per_position: 1500
+# Spending cap per pick. Always buys exactly 1 contract; if that contract
+# costs more than this, the ticker is skipped entirely.
+# DEFAULT, NOT CONFIRMED BY COOPER -- $300 is a number he mentioned once and
+# never confirmed. Adjust freely.
+max_dollars_per_position: 300
 
 # Exit loop cadence.
 poll_interval_seconds: 30
+
+# Delta filtering. Off by default -- we assume Cooper's source already screens
+# on delta and sends only the picks it wants traded.
+# DEFAULT, NOT CONFIRMED BY COOPER.
+# This is a curated pick list from a paid service. The delta columns almost
+# certainly document upstream picks; filtering here would discard paid-for picks.
+# TVT-DELTA appears on a 0-100 scale, unlike Schwab's 0-1. For source: tvt,
+# both thresholds must be > 1.0 (e.g. 30 and 80); otherwise startup fails.
+delta_filter:
+  enabled: false
+  source: schwab          # "schwab" | "tvt" -- which column to read
+  min_abs_delta: 0.30     # inclusive; ignored while enabled: false
+  max_abs_delta: 0.80     # inclusive; ignored while enabled: false
+
+# Shared confirmation registry. Edit these flags only in this file after
+# confirmation from Cooper. Settings preserves them and cannot dismiss badges.
+# Unconfirmed defaults produce warnings; they do not block live trading.
+setting_confirmations:
+  spending_cap:
+    confirmed_by_cooper: false
+  ten_percent_stop:
+    confirmed_by_cooper: false
+  delta_filter:
+    confirmed_by_cooper: false

@@ -21,7 +21,23 @@ __all__ = ["create_app", "WebPaths", "EngineRunner"]
 
 
 def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None) -> Flask:
+    import secrets
+    from urllib.parse import urlsplit
+    from flask import request, jsonify
     app = Flask(__name__)
+    app.secret_key = secrets.token_hex(32)
+    app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
+
+    @app.before_request
+    def same_origin_writes():
+        origin = request.headers.get("Origin")
+        if request.method == "POST" and origin and urlsplit(origin).netloc != request.host:
+            return jsonify(error="Cross-origin writes are not allowed"), 403
+
+    @app.errorhandler(413)
+    def oversized(_error):
+        return jsonify(error="File is too large; the limit is 8 MB"), 413
+
     app.config["COOPA_PATHS"] = paths or paths_from_env()
     app.config["COOPA_RUNNER"] = runner or EngineRunner(app.config["COOPA_PATHS"])
     app.register_blueprint(bp)

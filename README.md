@@ -1,70 +1,149 @@
 # Coopa Trada
 
-Skeleton of a Python program that places and manages **single-leg option orders**
-through the Charles Schwab Trader API from external trade signals.
+A local Python app that reads Cooper's **FOMC Picks** lists and places/manages
+single-leg option orders through Charles Schwab. It follows the listed contracts;
+it does not generate investment recommendations. Simulation is the default.
 
-Design stance:
-
-- **The signal format is Cooper's "FOMC Picks" list.** `CsvSignalSource` parses it
-  behind a clean interface (`SignalSource`): a title line carrying the shared
-  expiration, then a `SYMBOL | OPTION | LAST PRICE | TVT-DELTA | SCHWAB DELTA`
-  table. A row whose `OPTION` cell isn't `{strike}{C|P}`, or whose ticker isn't in
-  `config/asset_classes.yaml`, is skipped with a warning — never guessed.
-- **Exit logic is the heart of the program.** `coopa_trada/exits.py` is pure — no I/O,
-  no clock, no network — and is proven against synthetic price series in
-  `tests/test_exits.py` before any live quote can reach it.
-- **Dry run is the default.** Live trading requires two independent opt-ins:
-  `--live` on the CLI **and** `LIVE_TRADING=1` in the environment. Either alone stays
-  DRY-RUN.
-- **No naive datetimes, ever.** Everything tz-aware; stored as ISO-8601 UTC. Market
-  logic uses `America/New_York`; human output uses `America/Denver`.
-- **No hardcoded 9:30 / 16:00.** Session opens/closes (half days, holidays) come from
-  `exchange_calendars` (`XNYS`).
-- **Every order carries an idempotency key.** `sha256(signal_id|INTENT|YYYY-MM-DD)`,
-  UNIQUE in the DB. A re-run collides instead of double-ordering.
-- **Reconcile at startup.** Schwab is treated as the source of truth; local rows that
-  diverge are flagged, not trusted. In dry-run, reconcile is a logged no-op.
-- **The trade log answers everything.** Every broker call persists its full request and
-  response as JSON. `tests/test_store.py` reconstructs a round trip from the DB alone.
-
-## Layout
-
-```
-coopa_trada/
-  __main__.py     argparse: run | reconcile | resolve
-  config.py       env loading + DRY-RUN vs LIVE resolution
-  logs.py         logging + loud MODE banner
-  clock.py        tz helpers; naive-datetime guard
-  calendar_svc.py exchange_calendars XNYS wrapper
-  idempotency.py  make_key(signal_id, intent, date)
-  models.py       Signal, SignalSource, CsvSignalSource (+ config/asset_classes.yaml lookup)
-  contracts.py    Signal -> resolved OSI contract (+ offline SyntheticResolver)
-  store.py        SQLite trade log
-  rules.py        YAML -> Rules
-  exits.py        ExitStrategy protocol + 4 strategies + CompositeExit
-  broker.py       Broker protocol; SchwabBroker, DryRunBroker
-  ratelimit.py    token bucket ~120 req/min
-  engine.py       scheduler / reconcile / entry / exit loop
-```
-
-## Setup
+## Set up and open the dashboard
 
 ```bash
-python -m venv .venv && . .venv/bin/activate
-pip install -e '.[dev]'
-
-cp .env.example .env                              # leave creds blank for dry-run
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev,web]'
+cp .env.example .env
 cp config/rules.example.yaml config/rules.yaml
-pytest -q                                         # all green
+pytest
+python -m coopa_trada.web
 ```
 
-## One-time token login
+Open http://127.0.0.1:8770. Keep the app local; it has no user authentication.
+Leave credentials blank for simulation. The `.[web]` extra installs Flask.
 
-The program assumes an OAuth token file has already been minted by a one-time
-interactive login (a browser round trip you run once on a machine you control).
+### Upload, review, then select picks
+
+1. Choose a CSV, JPEG, or PNG and click **Read file** (8 MB maximum).
+2. Check the extracted text against the original. Correct any reading errors.
+3. Enter the **full trade date and expiration**, including the year. The image's
+   month/day title alone is not sufficient to confirm those dates.
+4. Click **Preview picks**. Every row must parse; unknown tickers, invalid
+   contracts, nonfinite numbers, duplicate picks, and missing prices are rejected.
+5. Check the table, then **Confirm and select these picks**. This saves a reviewed
+   CSV beside the database in `imports/`; it does not start trading.
+6. Start a dry run separately. The run date is filled from the reviewed list.
+
+Image recognition runs locally using Apple Vision through a bundled Swift helper.
+It currently requires **macOS and the Swift toolchain** (Xcode or Command Line
+Tools). CSV works on other supported Python platforms. Recognition is designed
+for the five-column screenshot format, and can misread other layouts; the editable
+preview is required before selecting an uploaded list. The supplied screenshot
+was checked against all eight rows, including decimal strikes and negative deltas.
+Images are discarded after recognition; only confirmed CSV files are retained.
+
+Editing text or dates invalidates the preview. Signed previews expire after an
+hour or server restart. Selected uploads persist on disk, but selection itself
+is per server session; reselect after restarting. A running job keeps its original
+file paths, and selection changes are blocked until it stops.
+
+The original CSV-path endpoint and CLI remain available for already-prepared CSVs.
+The sample `data/signals.example.csv` matches the supplied screenshot exactly.
+
+## Trading behavior
+
+- Always buy **one contract per eligible pick**. The spending cap is a skip gate,
+  calculated from the **ask × 100** (excluding commissions/fees). It never increases
+  the quantity for cheap options. Pending entry orders reserve position slots.
+- `OPTION` is `{strike}{C|P}`, e.g. `44P` or `322.5C`. Tickers must appear in
+  `config/asset_classes.yaml`. CLI ingestion skips invalid notation/unknown tickers
+  with warnings; upload preview rejects the entire list until corrected.
+- LAST PRICE is reference information. Live orders use fresh broker quotes;
+  simulation uses deterministic generated quotes, not historical market data.
+- Entries are limit buys at the ask, scheduled relative to the exchange close.
+  Exits are limit sells at the bid, evaluated during each asset class's configured
+  exit window. An exit order being submitted does **not** guarantee it fills.
+- Stop loss, take profit, trailing peak, and time-based exits are configurable.
+  Observed peaks are stored per entry and survive polling and app restarts.
+- Real session times use `exchange_calendars` (`XNYS`). Internal timestamps are
+  timezone-aware UTC; market rules use New York and human output uses Denver.
+- Broker order status is polled before each exit tick. Validated execution records
+  provide actual fill prices/timestamps, with atomic snapshots preventing duplicate
+  fills. A delayed entry is monitored even when there are no filled positions yet.
+- Unfilled entries are canceled at their exit deadline, then checked again for fills
+  racing with cancellation. Exit orders remain monitored until they settle or the
+  market closes. Unsettled exposure at close produces an explicit error.
+- Startup reconciliation compares broker and local positions, quantities, and open
+  orders. Divergences block a run; they are not silently adopted or overwritten.
+- Simulated/live orders have separate idempotency keys and mode-filtered position
+  queries. A live database is bound to one account. Legacy live databases without
+  a recorded account binding require manual reconciliation/migration.
+- A submitted order's uncertain outcome is never blindly retried. An unresolved
+  request without a broker ID blocks further synchronization until investigated.
+
+The dashboard's **Stop** stops monitoring; it does not liquidate positions or
+cancel all outstanding broker orders. Treat it as stopping the program, not as an
+emergency sell button.
+
+## Cooper's decisions are still required
+
+The example cap (`1500`) and exit settings are placeholders. Before live use,
+record Cooper's actual cap and selling rules. In particular, clarify whether
+“drops 10%” means from entry or from the observed high, and whether it replaces
+any of the other exit rules. The example leaves both interpretations enabled for
+simulation; live runs reject that ambiguity.
+
+Delta columns are recorded but no delta filter is implemented. Live runs currently
+require Cooper to confirm picks are filtered upstream:
+
+```yaml
+# Set only after confirming the actual cap and exit settings with Cooper.
+live_rules_confirmed: true
+delta_policy: already_filtered
+```
+
+The default is `live_rules_confirmed: false` and `delta_policy: unconfirmed`.
+Saving settings in the dashboard resets confirmation, because it changes the
+reviewed rules. If Cooper needs filtering inside this app, implement his exact
+criteria before enabling live runs.
+
+## CLI simulation
 
 ```bash
-python - <<'PY'
+python -m coopa_trada run --once \
+  --date 2026-09-02 \
+  --signals data/signals.example.csv \
+  --config config/rules.example.yaml \
+  --db /tmp/coopa-demo.db
+```
+
+No network or token is needed. `--once` runs one entry pass and exit tick. A full
+simulation uses the real clock, not a historical replay. Re-running the same pick,
+intent, date and mode reuses the existing order, rather than submitting again.
+
+Input supports the original combined title:
+
+```csv
+FOMC Picks for 9/2, 9/4 Expiration
+SYMBOL,OPTION,LAST PRICE,TVT-DELTA,SCHWAB DELTA
+IBIT,44P,0.71,66.4,-0.554
+```
+
+Reviewed uploads use explicit dates, avoiding year inference:
+
+```csv
+Trade date: 2026-09-02; Expiration: 2026-09-04
+SYMBOL,OPTION,LAST PRICE,TVT-DELTA,SCHWAB DELTA
+IBIT,44P,0.71,66.4,-0.554
+```
+
+## Schwab connection and live mode
+
+This version has been tested with simulated responses, **not a real Schwab
+account**. No real orders were placed during development. Use a dedicated database
+and one running process per account. Complete read-only integration checks and
+supervised verification before unattended use.
+
+Mint an OAuth token with the interactive helper, using your own app credentials:
+
+```python
 from schwab.auth import client_from_login_flow
 client_from_login_flow(
     api_key="<SCHWAB_API_KEY>",
@@ -72,103 +151,35 @@ client_from_login_flow(
     callback_url="https://127.0.0.1:8182",
     token_path="./schwab_token.json",
 )
-PY
 ```
 
-Point `SCHWAB_TOKEN_PATH` at the resulting file. `schwab-py` refreshes it in place.
-(Exact helper names are confirmed against the installed `schwab-py` version.)
+Set `SCHWAB_TOKEN_PATH` and `SCHWAB_ACCOUNT_ID` in `.env`. Credentials never belong
+in source control. `schwab-py` manages token refresh; the dashboard shows a local
+file-age estimate, not proof the server will accept a token.
 
-## Run modes
-
-### Dry run (default) — no network, no token needed
+Read-only commands:
 
 ```bash
-python -m coopa_trada run --once \
-  --date 2026-09-02 \
-  --signals data/signals.example.csv \
-  --db ./trada.db
+python -m coopa_trada resolve --signals data/signals.example.csv --date 2026-09-02
+LIVE_TRADING=1 python -m coopa_trada reconcile --live --db ./live.db
 ```
 
-Prints the `MODE = DRY-RUN` banner, creates `trada.db`, resolves contracts with the
-offline `SyntheticResolver`, places a simulated entry **at the ask**, runs one exit
-tick, and returns.
+Live trading needs **both** `--live` and `LIVE_TRADING=1`, plus confirmed rules.
+The dashboard substitutes its typed confirmation phrase for the CLI flag. Live
+runs must use today's market date; `--once` and after-close starts are rejected.
+The app never enables the environment opt-in itself.
 
-Inspect the log:
+The broker adapter uses the documented [schwab-py order methods](https://schwab-py.readthedocs.io/en/latest/client.html)
+and [single-leg limit order templates](https://schwab-py.readthedocs.io/en/latest/order-templates.html).
 
-```bash
-sqlite3 ./trada.db \
-  "SELECT o.osi_symbol, o.side, f.price, f.filled_at_utc
-     FROM orders o JOIN fills f ON f.order_id = o.id;"
-```
+## Limits and remaining integration work
 
-Re-run the exact command → idempotency-key collision, **no duplicate order rows**.
+- No multi-leg spreads, strike-selection heuristics, or per-row expirations.
+- No historical backtesting or live-market paper-trading feed.
+- No automatic adoption of untracked positions, automatic recovery of ambiguous
+  submissions, or automatic repricing/replacement of unfilled exit limits.
+- Image extraction supports this table layout on macOS; always review the output.
+- Exit triggers are local polling rules, not broker-hosted protective orders.
+  Interruptions, quote failures, and unfilled limits require operator attention.
 
-### resolve — read-only, needs a token
-
-```bash
-python -m coopa_trada resolve --signals data/signals.example.csv
-```
-
-With no token it fails loudly with a clear "no Schwab token" message (not a
-traceback). With a token it prints each signal's OSI symbol + bid/ask/mid/OI, or the
-`ContractUnderspecified` / `ContractNotTradable` reason.
-
-### reconcile
-
-```bash
-python -m coopa_trada reconcile
-```
-
-With a real `.env` + token: prints live Schwab positions/orders vs the local trade
-log, flagging every divergence. In dry-run it logs `simulated` and does nothing.
-
-### Live
-
-```bash
-LIVE_TRADING=1 python -m coopa_trada run --live --date 2026-09-02
-```
-
-`run --live` **without** `LIVE_TRADING=1` still logs `MODE = DRY-RUN`.
-
-## Pending confirmation from Cooper
-
-Both original questions are now **resolved**. Only a residual on each remains.
-
-1. **Position sizing — resolved: always 1 contract per pick; the dollar cap is a
-   pure skip gate.** Cooper's rule is a flat "buy 1 per pick," never more.
-   `max_dollars_per_position` is a spending gate, not a sizing formula: if 1
-   contract (`mid * 100`) would cost more than it, `FixedQuantitySizer` returns
-   `0` and the ticker is **skipped entirely**; otherwise it returns `1`, however
-   cheap the contract. Only sizer; no contract-count or per-ticker quantity
-   scheme. *Residual:* the cap figure in `rules.example.yaml` (1500) is still a
-   placeholder — confirm the real number with Cooper before going live.
-
-2. **Contract notation — resolved: `{strike}{C|P}` is permanent.** It will not
-   change, so there is no new parser branch. A row that fails the pattern is
-   surfaced loudly, not silently dropped: a per-row `WARNING`, a batch-level
-   `ERROR` summary from `CsvSignalSource.fetch`, and a `[E_SIGNAL_NOTATION]` line
-   plus skipped-row count in `resolve` output (`UnrecognizedContractNotation.code`).
-   The regex (`^(\d+\.?\d*)([CP])$`, case-insensitive) and the skip-and-continue
-   behavior are unchanged.
-
-Still unconfirmed:
-
-- **"Sell if it drops 10% between the times I said."** Could mean 10% off the
-  session peak (`TrailingPeak`) or 10% off entry (`StopLoss`). `rules.example.yaml`
-  wires both — `cooper_drop_from_peak_pct` and `cooper_drop_from_entry_pct` — and
-  leaves both active; `CompositeExit` fires whichever triggers first. It's also
-  unconfirmed whether this 10% *replaces* the existing 25% / 40% / 60% exits, so
-  all of those keys coexist for now. These two keys look redundant on purpose.
-- **Delta filtering.** `TVT-DELTA` / `SCHWAB DELTA` are captured on the `Signal`
-  (`signal_delta_tvt`, `signal_delta_schwab`) but not filtered on anywhere —
-  unknown whether Cooper pre-filters upstream or we're meant to.
-
-## Out of scope (stubbed)
-
-Delta-based filtering logic · multi-expiration-per-list handling · any
-`SignalSource` beyond CSV · strike/expiration selection heuristics (raise
-`ContractUnderspecified`) · multi-leg / spreads · backtesting harness.
-
-Position sizing is settled (`FixedQuantitySizer`: always 1 contract per pick,
-`max_dollars_per_position` a pure skip gate); there is no contract-count or
-per-ticker quantity sizer, planned or otherwise.
+See `PROJECT_STATE.md` for the current validation and remaining decisions.

@@ -5,7 +5,7 @@ Two implementations, one code path. Both write identical ``orders`` and
 ``_BrokerBase._submit`` builds the idempotency key, short-circuits on a hit,
 and persists request then response JSON around the implementation call.
 
-Fills — in both modes — are buys at the ask and sells at the bid. Never mid.
+Simulated fills use the submitted ask/bid. Live fills use actual broker executions.
 """
 
 from __future__ import annotations
@@ -72,33 +72,48 @@ class _BrokerBase:
         request: Any,
         do_call: Callable[[], tuple[str, str | None, Any]],
         fill_price: float | None,
+        entry_order_id: int | None = None,
     ) -> OrderResult:
-        key = make_key(signal_id, intent, day)
-        existing = self.store.find_order_by_idempotency_key(key)
-        if existing is not None:
-            return OrderResult(
-                idempotency_key=key,
-                broker_order_id=existing["broker_order_id"],
-                status=existing["status"],
-                submitted_price=existing["limit_price"],
-                mode=existing["mode"],
-                raw_response={"deduplicated": True, "order_id": existing["id"]},
-                order_row_id=int(existing["id"]),
-                deduplicated=True,
-            )
+        with self.store.transaction():
+            legacy_key = make_key(signal_id, intent, day)
+            key = self.mode.value + ":" + legacy_key
+            existing = self.store.find_order_by_idempotency_key(key)
+            if existing is None:
+                legacy = self.store.find_order_by_idempotency_key(legacy_key)
+                if legacy is not None and legacy["mode"] == self.mode.value:
+                    existing = legacy
+            if intent is Intent.EXIT and entry_order_id is not None:
+                prior_exit = self.store.conn.execute(
+                    "SELECT * FROM orders WHERE intent='EXIT' AND mode=? AND entry_order_id=? ORDER BY id DESC LIMIT 1",
+                    (self.mode.value, entry_order_id),
+                ).fetchone()
+                if prior_exit is not None:
+                    existing = prior_exit
+            if existing is not None:
+                return OrderResult(
+                    idempotency_key=key,
+                    broker_order_id=existing["broker_order_id"],
+                    status=existing["status"],
+                    submitted_price=existing["limit_price"],
+                    mode=existing["mode"],
+                    raw_response={"deduplicated": True, "order_id": existing["id"]},
+                    order_row_id=int(existing["id"]),
+                    deduplicated=True,
+                )
 
-        order_id = self.store.record_order(
-            signal_id=signal_id,
-            intent=intent,
-            idempotency_key=key,
-            mode=self.mode.value,
-            osi_symbol=osi_symbol,
-            side=side,
-            quantity=quantity,
-            limit_price=limit_price,
-            status="PENDING",
-            request=request,
-        )
+            order_id = self.store.record_order(
+                signal_id=signal_id,
+                intent=intent,
+                idempotency_key=key,
+                mode=self.mode.value,
+                osi_symbol=osi_symbol,
+                side=side,
+                quantity=quantity,
+                limit_price=limit_price,
+                status="PENDING",
+                request=request,
+                entry_order_id=entry_order_id,
+            )
 
         try:
             status, broker_order_id, response = do_call()
@@ -146,6 +161,7 @@ class SchwabBroker(_BrokerBase):
         super().__init__(store)
         self.client = client
         self.account_hash = account_hash
+        self.store.bind_live_account(account_hash)
         self.ratelimiter = ratelimiter
 
     # -- helpers -------------------------------------------------
@@ -167,7 +183,7 @@ class SchwabBroker(_BrokerBase):
     def place_entry(self, contract, quantity, limit_price, *, signal_id, day):
         from schwab.orders.options import option_buy_to_open_limit
 
-        order_spec = option_buy_to_open_limit(contract.osi_symbol, quantity, limit_price)
+        order_spec = option_buy_to_open_limit(contract.osi_symbol, quantity, f"{limit_price:.2f}")
         request = {
             "kind": "option_buy_to_open_limit",
             "symbol": contract.osi_symbol,
@@ -179,7 +195,11 @@ class SchwabBroker(_BrokerBase):
         def do_call():
             self._rl()
             resp = self.client.place_order(self.account_hash, order_spec)
-            return _OPEN_STATUS, self._extract_order_id(resp), _response_summary(resp)
+            _check_response(resp)
+            oid = self._extract_order_id(resp)
+            if not oid:
+                raise RuntimeError("Schwab accepted an order without an order ID; reconcile manually before retrying")
+            return _OPEN_STATUS, oid, _response_summary(resp)
 
         return self._submit(
             intent=Intent.ENTRY,
@@ -197,7 +217,7 @@ class SchwabBroker(_BrokerBase):
     def place_exit(self, position, limit_price, decision, *, signal_id, day):
         from schwab.orders.options import option_sell_to_close_limit
 
-        order_spec = option_sell_to_close_limit(position.osi_symbol, position.quantity, limit_price)
+        order_spec = option_sell_to_close_limit(position.osi_symbol, position.quantity, f"{limit_price:.2f}")
         request = {
             "kind": "option_sell_to_close_limit",
             "symbol": position.osi_symbol,
@@ -210,10 +230,15 @@ class SchwabBroker(_BrokerBase):
         def do_call():
             self._rl()
             resp = self.client.place_order(self.account_hash, order_spec)
-            return _OPEN_STATUS, self._extract_order_id(resp), _response_summary(resp)
+            _check_response(resp)
+            oid = self._extract_order_id(resp)
+            if not oid:
+                raise RuntimeError("Schwab accepted an order without an order ID; reconcile manually before retrying")
+            return _OPEN_STATUS, oid, _response_summary(resp)
 
         return self._submit(
             intent=Intent.EXIT,
+            entry_order_id=position.entry_order_id,
             signal_id=signal_id,
             day=day,
             osi_symbol=position.osi_symbol,
@@ -225,9 +250,28 @@ class SchwabBroker(_BrokerBase):
             fill_price=None,
         )
 
+    def cancel_entry(self, order) -> None:
+        if order["mode"] != self.mode.value or order["intent"] != "ENTRY":
+            raise ValueError("Can only cancel this mode's entry orders")
+        self._rl()
+        resp = self.client.cancel_order(order["broker_order_id"], self.account_hash)
+        _check_response(resp)
+        # Cancellation races with fills. Only the subsequent broker snapshot settles it.
+        self.sync_orders()
+
+    def sync_orders(self) -> None:
+        for order in self.store.orders_open(self.mode.value):
+            if not order["broker_order_id"]:
+                raise RuntimeError("Unresolved local order without broker ID; reconcile manually before trading")
+            self._rl()
+            resp = self.client.get_order(order["broker_order_id"], self.account_hash)
+            _check_response(resp)
+            self.store.sync_order(order["id"], resp.json())
+
     def get_positions(self) -> list[dict]:
         self._rl()
         resp = self.client.get_account(self.account_hash, fields=self._position_fields())
+        _check_response(resp)
         data = resp.json() if hasattr(resp, "json") else resp
         acct = (data or {}).get("securitiesAccount", data) or {}
         return list(acct.get("positions", []))
@@ -235,6 +279,7 @@ class SchwabBroker(_BrokerBase):
     def get_open_orders(self) -> list[dict]:
         self._rl()
         resp = self.client.get_orders_for_account(self.account_hash)
+        _check_response(resp)
         data = resp.json() if hasattr(resp, "json") else resp
         orders = data if isinstance(data, list) else (data or {}).get("orders", [])
         open_statuses = {"WORKING", "PENDING_ACTIVATION", "QUEUED", "ACCEPTED", "AWAITING_MANUAL_REVIEW"}
@@ -248,6 +293,13 @@ class SchwabBroker(_BrokerBase):
             return Client.Account.Fields.POSITIONS
         except Exception:
             return "positions"
+
+
+def _check_response(resp) -> None:
+    if hasattr(resp, "raise_for_status"):
+        resp.raise_for_status()
+    elif hasattr(resp, "status_code") and not 200 <= resp.status_code < 300:
+        raise RuntimeError(f"Schwab HTTP {resp.status_code}")
 
 
 def _response_summary(resp) -> dict:
@@ -322,8 +374,7 @@ class DryRunBroker(_BrokerBase):
         return result
 
     def place_exit(self, position, limit_price, decision, *, signal_id, day):
-        quote = self._quote(position.osi_symbol)
-        fill_price = quote.bid if quote is not None else limit_price  # sells fill at the bid
+        fill_price = limit_price  # sells fill at the bid
         request = {
             "kind": "DRY option_sell_to_close_limit",
             "symbol": position.osi_symbol,
@@ -341,6 +392,7 @@ class DryRunBroker(_BrokerBase):
 
         result = self._submit(
             intent=Intent.EXIT,
+            entry_order_id=position.entry_order_id,
             signal_id=signal_id,
             day=day,
             osi_symbol=position.osi_symbol,
@@ -355,7 +407,7 @@ class DryRunBroker(_BrokerBase):
         return result
 
     def get_positions(self) -> list[dict]:
-        rows = self.store.open_positions()
+        rows = self.store.open_positions(self.mode.value)
         return [
             {
                 "instrument": {"symbol": r["osi_symbol"]},
@@ -368,7 +420,7 @@ class DryRunBroker(_BrokerBase):
         ]
 
     def get_open_orders(self) -> list[dict]:
-        return [dict(r) for r in self.store.orders_open()]
+        return [dict(r) for r in self.store.orders_open(self.mode.value)]
 
     # -- helpers -------------------------------------------------
     def _quote(self, osi: str) -> Quote | None:
@@ -395,6 +447,7 @@ class SchwabQuoteSource:
         if self.ratelimiter is not None:
             self.ratelimiter.acquire()
         resp = self.client.get_quote(osi_symbol)
+        _check_response(resp)
         data = resp.json() if hasattr(resp, "json") else resp
         node = (data or {}).get(osi_symbol, {})
         q = node.get("quote", node)
@@ -402,6 +455,9 @@ class SchwabQuoteSource:
         ask = float(q.get("askPrice") or q.get("ask") or 0.0)
         mark = q.get("mark")
         mid = float(mark) if mark else round((bid + ask) / 2, 4)
+        import math
+        if not all(math.isfinite(v) and v > 0 for v in (bid, ask, mid)) or bid > ask:
+            raise ValueError("Schwab returned an invalid option quote")
         return Quote(bid=bid, ask=ask, mid=mid)
 
     def register(self, osi_symbol: str, mid: float) -> None:  # parity with SyntheticQuoteSource

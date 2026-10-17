@@ -243,5 +243,71 @@ def api_signals():
         count = len(CsvSignalSource(str(path)).fetch(None))
     except Exception as exc:  # parser errors surfaced plainly
         return jsonify(error=f"could not parse as a signals CSV: {exc}"), 400
-    _paths().signals_path = str(path)
+    with _runner()._lock:
+        if _runner().status == "running":
+            return jsonify(error="Stop the run before changing picks"), 409
+        _paths().signals_path = str(path)
     return jsonify({"signals_path": str(path), "signal_count": count})
+
+# Uploads never select picks or start trading. A signed preview must be confirmed.
+@bp.post("/api/signals/upload")
+def api_signals_upload():
+    import tempfile
+    from ..imports import recognize_image
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return jsonify(error="Choose a CSV, JPEG, or PNG file"), 400
+    suffix = Path(upload.filename).suffix.lower()
+    if suffix not in {".csv", ".jpg", ".jpeg", ".png"}:
+        return jsonify(error="Choose a CSV, JPEG, or PNG file"), 400
+    try:
+        if suffix == ".csv":
+            text = upload.read().decode("utf-8-sig")
+        else:
+            with tempfile.TemporaryDirectory(prefix="coopa-image-") as tmp:
+                path = Path(tmp) / ("image" + suffix)
+                upload.save(path)
+                text = recognize_image(path)
+        return jsonify(csv=text, image=suffix != ".csv")
+    except (ValueError, OSError) as exc:
+        return jsonify(error=str(exc)), 400
+
+
+def _preview_signer():
+    from itsdangerous import URLSafeTimedSerializer
+    return URLSafeTimedSerializer(current_app.secret_key, salt="signal-preview")
+
+
+@bp.post("/api/signals/preview")
+def api_signals_preview():
+    from ..imports import preview_csv
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify(error="Expected a JSON object"), 400
+    try:
+        preview = preview_csv(body["csv"], body["date"], body["expiration"])
+        preview["token"] = _preview_signer().dumps({k: preview[k] for k in ("csv", "date", "expiration")})
+        return jsonify(preview)
+    except (ValueError, TypeError, KeyError, OSError) as exc:
+        return jsonify(error=f"Check the picks and dates: {exc}"), 400
+
+
+@bp.post("/api/signals/confirm")
+def api_signals_confirm():
+    from itsdangerous import BadSignature
+    from uuid import uuid4
+    body = request.get_json(silent=True) or {}
+    try:
+        preview = _preview_signer().loads(body.get("token", ""), max_age=3600)
+    except (BadSignature, TypeError):
+        return jsonify(error="Preview expired or changed. Preview the picks again."), 400
+    runner = _runner()
+    with runner._lock:
+        if runner.status == "running":
+            return jsonify(error="Stop the current run before selecting new picks"), 409
+        directory = Path(_paths().db_path).resolve().parent / "imports"
+        directory.mkdir(parents=True, exist_ok=True)
+        path = directory / f"{preview['date']}-{uuid4().hex}.csv"
+        path.write_text(preview["csv"], encoding="utf-8")
+        _paths().signals_path = str(path)
+    return jsonify(signals_path=str(path), date=preview["date"], message="Picks selected. Start a dry run when ready.")

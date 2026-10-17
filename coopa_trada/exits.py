@@ -58,6 +58,7 @@ class PositionState:
     session_peak_mid: float
     asset_class: AssetClass
     hard_exit_at: datetime
+    entry_order_id: int | None = None
 
     def __post_init__(self) -> None:
         ensure_aware(self.entry_at)

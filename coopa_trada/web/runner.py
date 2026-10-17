@@ -13,6 +13,7 @@ runner never force-liquidates.
 from __future__ import annotations
 
 import threading
+from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Callable
 
@@ -81,7 +82,7 @@ class EngineRunner:
             self.last_error = None
             self.last_result = None
             self._thread = threading.Thread(
-                target=self._run, args=(bool(live), date_str), daemon=True
+                target=self._run, args=(bool(live), date_str, replace(self._paths)), daemon=True
             )
             self._thread.start()
 
@@ -94,7 +95,7 @@ class EngineRunner:
         if self._stop.wait(timeout=max(0.0, seconds)):
             raise RunStopped()
 
-    def _run(self, live: bool, date_str: str | None) -> None:
+    def _run(self, live: bool, date_str: str | None, paths: WebPaths) -> None:
         store = None
         try:
             mode = resolve_mode(live)  # DRY-RUN unless live AND LIVE_TRADING=1
@@ -105,9 +106,9 @@ class EngineRunner:
 
             engine, store = build_engine(
                 mode=mode,
-                signals_path=self._paths.signals_path,
-                config_path=self._paths.config_path,
-                db_path=self._paths.db_path,
+                signals_path=paths.signals_path,
+                config_path=paths.config_path,
+                db_path=paths.db_path,
                 sleep=self._sleep,
                 now=self._now,
             )

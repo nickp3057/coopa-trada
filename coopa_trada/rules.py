@@ -7,12 +7,13 @@ The per-asset-class exit window accepts, for each endpoint, either a
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
 import yaml
+import math
 
 from .models import AssetClass
 
@@ -20,7 +21,78 @@ if TYPE_CHECKING:
     from .contracts import ResolvedContract
     from .models import Signal
 
-__all__ = ["Rules", "load_rules", "PositionSizer", "FixedQuantitySizer"]
+__all__ = ["Rules", "load_rules", "PositionSizer", "FixedQuantitySizer", "DeltaFilter", "setting_confirmations", "default_settings_metadata"]
+
+
+SETTING_LABELS = {
+    "spending_cap": "spending cap",
+    "ten_percent_stop": "10% stop basis",
+    "delta_filter": "delta filter",
+}
+
+
+def setting_confirmations(raw: dict | None = None) -> dict:
+    """One registry for all hand-edited confirmation markers; missing means false."""
+    raw = {} if raw is None else raw
+    if not isinstance(raw, dict):
+        raise ValueError("setting_confirmations must be a mapping")
+    if set(raw) - SETTING_LABELS.keys():
+        raise ValueError("Unknown setting in setting_confirmations")
+    result = {}
+    for key in SETTING_LABELS:
+        marker = raw.get(key, {"confirmed_by_cooper": False})
+        if not isinstance(marker, dict) or type(marker.get("confirmed_by_cooper")) is not bool:
+            raise ValueError(f"setting_confirmations.{key}.confirmed_by_cooper must be true or false")
+        result[key] = {"confirmed_by_cooper": marker["confirmed_by_cooper"]}
+    return result
+
+
+def default_settings_metadata(markers: dict) -> list[dict]:
+    return [{"key": key, "label": label, **markers[key]}
+            for key, label in SETTING_LABELS.items()]
+
+
+@dataclass(frozen=True)
+class DeltaFilter:
+    enabled: bool = False
+    source: str = "schwab"
+    min_abs_delta: float = 0.30
+    max_abs_delta: float = 0.80
+
+    def __post_init__(self):
+        if type(self.enabled) is not bool:
+            raise ValueError("delta_filter.enabled must be true or false")
+        if self.source not in ("schwab", "tvt"):
+            raise ValueError('delta_filter.source must be "schwab" or "tvt"')
+        for name in ("min_abs_delta", "max_abs_delta"):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+                raise ValueError(f"delta_filter.{name} must be a finite number")
+        if not 0 <= self.min_abs_delta <= self.max_abs_delta:
+            raise ValueError("delta_filter requires 0 <= min_abs_delta <= max_abs_delta")
+        if self.source == "tvt" and min(self.min_abs_delta, self.max_abs_delta) <= 1.0:
+            raise ValueError("delta_filter source=tvt uses the apparent 0–100 scale: both thresholds must be > 1.0 (for example 30 and 80), not 0.30 and 0.80")
+
+    @classmethod
+    def from_config(cls, raw=None):
+        if raw is None:
+            return cls()
+        if not isinstance(raw, dict):
+            raise ValueError("delta_filter must be a mapping")
+        if set(raw) - {"enabled", "source", "min_abs_delta", "max_abs_delta"}:
+            raise ValueError("Unknown delta_filter setting")
+        return cls(**raw)
+
+    def skip_reason(self, signal: "Signal") -> str | None:
+        if not self.enabled:
+            return None
+        value = getattr(signal, f"signal_delta_{self.source}")
+        if value is None or not math.isfinite(value):
+            return f"delta filter: {self.source} delta is missing or nonfinite"
+        if not self.min_abs_delta <= abs(value) <= self.max_abs_delta:
+            return (f"delta filter: abs({self.source} delta {value:g}) = {abs(value):g} "
+                    f"outside inclusive band [{self.min_abs_delta:g}, {self.max_abs_delta:g}]")
+        return None
 
 
 @dataclass(frozen=True)
@@ -33,8 +105,9 @@ class Rules:
     max_concurrent_positions: int
     max_dollars_per_position: float
     poll_interval_seconds: int
-    # Ambiguous per Cooper 9/2 ("drops 10% between the times I said"). Optional:
-    # absent -> the corresponding extra exit strategy is simply not wired.
+    delta_filter: DeltaFilter = field(default_factory=DeltaFilter)
+    setting_confirmations: dict = field(default_factory=setting_confirmations)
+    # Optional existing strategies; null leaves the corresponding strategy unwired.
     cooper_drop_from_peak_pct: float | None = None
     cooper_drop_from_entry_pct: float | None = None
 
@@ -59,7 +132,7 @@ class FixedQuantitySizer:
         self.quantity = int(quantity)
 
     def size(self, signal: "Signal", contract: "ResolvedContract", rules: Rules) -> int:
-        if contract.mid <= 0:
+        if not math.isfinite(contract.mid) or contract.mid <= 0:
             return 0
         total_cost = contract.mid * 100 * self.quantity
         if total_cost > self.dollars_per_position:
@@ -104,7 +177,7 @@ def _coerce_exit_window(raw) -> dict[AssetClass, tuple[time | int, time | int]]:
 def _pct(name: str, value, *, allow_zero: bool = False) -> float:
     v = float(value)
     lo = 0.0
-    if (v < lo) or (v == 0.0 and not allow_zero) or v >= 1.0:
+    if not math.isfinite(v) or (v < lo) or (v == 0.0 and not allow_zero) or v >= 1.0:
         raise ValueError(f"{name} must be in (0, 1){' or 0' if allow_zero else ''}, got {value!r}")
     return v
 
@@ -140,13 +213,15 @@ def load_rules(path: str | Path) -> Rules:
         raise ValueError("entry_minutes_before_close must be positive")
 
     max_dollars = float(data["max_dollars_per_position"])
-    if max_dollars <= 0:
+    if not math.isfinite(max_dollars) or max_dollars <= 0:
         raise ValueError("max_dollars_per_position must be positive")
 
     cooper_peak = data.get("cooper_drop_from_peak_pct")
     cooper_entry = data.get("cooper_drop_from_entry_pct")
 
     return Rules(
+        delta_filter=DeltaFilter.from_config(data.get("delta_filter")),
+        setting_confirmations=setting_confirmations(data.get("setting_confirmations")),
         entry_minutes_before_close=entry_minutes,
         exit_window=_coerce_exit_window(data["exit_window"]),
         trailing_stop_pct=_pct("trailing_stop_pct", data["trailing_stop_pct"]),
@@ -162,3 +237,4 @@ def load_rules(path: str | Path) -> Rules:
             _pct("cooper_drop_from_entry_pct", cooper_entry) if cooper_entry is not None else None
         ),
     )
+

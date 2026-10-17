@@ -103,12 +103,7 @@ class Engine:
         self._sleep = sleep
         self.log = get_logger("coopa_trada.engine", mode)
 
-        # CompositeExit returns the FIRST trigger. The two "cooper_drop_*" strategies
-        # are the ambiguous 10% stop (per Cooper 9/2) -- both left active so whichever
-        # would fire first, fires. They are prepended so intent reads top-down; each
-        # is optional (absent rule key -> strategy not wired). Note: the two StopLoss
-        # / two TrailingPeak instances both report strategy="StopLoss"/"TrailingPeak"
-        # in exit_events; the reason string embeds the pct, so they stay distinct.
+        # Optional 10% readings coexist with the standard exits. First trigger wins.
         strategies: list = []
         if rules.cooper_drop_from_entry_pct is not None:
             strategies.append(StopLoss(rules.cooper_drop_from_entry_pct))
@@ -128,11 +123,12 @@ class Engine:
             self.log.info("reconcile: simulated (dry-run no-op)")
             return ReconcileReport(mode=self.mode.value, simulated=True)
 
+        self._sync_orders()
         report = ReconcileReport(mode=self.mode.value)
         report.broker_positions = self.broker.get_positions()
         report.broker_open_orders = self.broker.get_open_orders()
-        report.local_open_positions = [dict(r) for r in self.store.open_positions()]
-        report.local_open_orders = [dict(r) for r in self.store.orders_open()]
+        report.local_open_positions = [dict(r) for r in self.store.open_positions(self.mode.value)]
+        report.local_open_orders = [dict(r) for r in self.store.orders_open(self.mode.value)]
 
         broker_syms = {self._symbol_of(p) for p in report.broker_positions}
         local_syms = {r["osi_symbol"] for r in report.local_open_positions}
@@ -145,6 +141,13 @@ class Engine:
             msg = f"divergence: Schwab position {sym} has no local open row (untracked; adopt from Schwab)"
             report.divergences.append(msg)
             self.log.warning(msg)
+
+        for sym in sorted(local_syms & broker_syms):
+            local_qty = sum(p["quantity"] for p in report.local_open_positions if p["osi_symbol"] == sym)
+            broker_qty = sum(float(p.get("longQuantity", 0)) - float(p.get("shortQuantity", 0))
+                             for p in report.broker_positions if self._symbol_of(p) == sym)
+            if local_qty != broker_qty:
+                report.divergences.append(f"quantity mismatch for {sym}: local={local_qty}, Schwab={broker_qty}")
 
         broker_order_ids = {str(o.get("orderId")) for o in report.broker_open_orders}
         local_broker_ids = {
@@ -176,13 +179,22 @@ class Engine:
 
     # -- main loop -------------------------------------------
     def run(self, day: date, *, once: bool = False) -> None:
-        self.reconcile()
+        if self.mode is Mode.LIVE:
+            if once:
+                raise ValueError("Live --once is disabled: orders require continuous monitoring")
+            if day != clock.to_market(self._now()).date():
+                raise ValueError("Live trading date must be today")
+        report = self.reconcile()
+        if report.divergences:
+            raise RuntimeError("Reconciliation found divergences; resolve them before starting trading")
 
         entry_time = self.cal.entry_at(day, self.rules.entry_minutes_before_close)
         self.log.info("entry scheduled for %s", clock.to_market(entry_time).isoformat())
         if not once:
             self._wait_until(entry_time)
 
+        if self.mode is Mode.LIVE and self._now() >= self.cal.session_close(day):
+            raise ValueError("Cannot start a live run after market close")
         self._entry_pass(day)
 
         if once:
@@ -197,7 +209,23 @@ class Engine:
         signals = self.source.fetch(day)
         self.log.info("fetched %d signal(s) for %s", len(signals), day.isoformat())
         for signal in signals:
+            if signal.expiration is None or signal.expiration < day:
+                self.log.warning("skip %s: expired or missing expiration", signal.id)
+                continue
+            _, end = self.cal.exit_window(day, signal.asset_class, self.rules)
+            if self.mode is Mode.LIVE and self._now() >= end:
+                self.log.warning("skip %s: exit deadline already reached", signal.id)
+                continue
             self.store.record_signal(signal)
+            delta_reason = self.rules.delta_filter.skip_reason(signal)
+            if delta_reason is not None:
+                self._record_skip(signal, day, "delta_filter", delta_reason, {
+                    "source": self.rules.delta_filter.source,
+                    "value": getattr(signal, f"signal_delta_{self.rules.delta_filter.source}"),
+                    "min_abs_delta": self.rules.delta_filter.min_abs_delta,
+                    "max_abs_delta": self.rules.delta_filter.max_abs_delta,
+                })
+                continue
             try:
                 contract = self.resolver.resolve(signal)
             except ContractUnderspecified as exc:
@@ -212,14 +240,17 @@ class Engine:
             # pick's cost would exceed max_dollars_per_position -- skip the ticker.
             qty = self.sizer.size(signal, contract, self.rules)
             if qty <= 0:
-                self.log.warning(
-                    "skip %s: 1 contract exceeds the per-position dollar cap "
-                    "(mid=%.4f, max_dollars=%.2f)",
-                    signal.id, mid, self.rules.max_dollars_per_position,
-                )
+                self._record_skip(signal, day, "spending_cap",
+                    f"1 contract exceeds spending cap (mid={mid:.4f}, cap={self.rules.max_dollars_per_position:.2f})",
+                    {"mid": mid, "cap": self.rules.max_dollars_per_position})
                 continue
 
-            open_count = len(self.store.open_positions())
+            positions = self.store.open_positions(self.mode.value)
+            pending = [r for r in self.store.orders_open(self.mode.value) if r["intent"] == "ENTRY"]
+            reserved = {r["signal_id"] for r in positions} | {r["signal_id"] for r in pending}
+            if signal.id in reserved:
+                continue
+            open_count = len(reserved)
             if open_count >= self.rules.max_concurrent_positions:
                 self.log.warning(
                     "skip %s: at max concurrent positions (%d)", signal.id, self.rules.max_concurrent_positions
@@ -237,11 +268,16 @@ class Engine:
                 result.broker_order_id, " (dedup)" if result.deduplicated else "",
             )
 
+    def _record_skip(self, signal, day, category, reason, detail):
+        self.log.warning("skip %s: %s", signal.id, reason)
+        self.store.record_skip(signal_id=signal.id, day=day, mode=self.mode.value,
+                               category=category, reason=reason, detail=detail)
+
     # -- exit -----------------------------------------------
     def _positions_state(self, day: date) -> list[tuple[PositionState, str]]:
         out: list[tuple[PositionState, str]] = []
         sig_meta = {}
-        for row in self.store.open_positions():
+        for row in self.store.open_positions(self.mode.value):
             asset_class = self._asset_class_for(row["signal_id"], sig_meta)
             _, end = self.cal.exit_window(day, asset_class, self.rules)
             entry_price = float(row["entry_price"])
@@ -250,9 +286,10 @@ class Engine:
                 entry_price=entry_price,
                 entry_at=clock.parse_iso(row["entry_at_utc"]),
                 quantity=int(row["quantity"]),
-                session_peak_mid=entry_price,
+                session_peak_mid=max(entry_price, float(row["peak_mid"])),
                 asset_class=asset_class,
                 hard_exit_at=end,
+                entry_order_id=row["order_id"],
             )
             out.append((state, row["signal_id"]))
         return out
@@ -270,17 +307,24 @@ class Engine:
         return ac
 
     def _exit_tick(self, day: date) -> int:
+        self._sync_orders()
         acted = 0
         for state, signal_id in self._positions_state(day):
             quote = self._quote(state.osi_symbol)
             update_peak(state, quote)
+            self.store.update_peak(state.entry_order_id, state.session_peak_mid)
             now = clock.to_market(self._now())
+            start, _ = self.cal.exit_window(day, state.asset_class, self.rules)
+            if now < start:
+                continue
             decision = self.composite.check(state, quote, now)
             if decision is None:
                 continue
             result = self.broker.place_exit(
                 state, quote.bid, decision, signal_id=signal_id, day=day
             )
+            if result.deduplicated:
+                continue
             self.store.record_exit_event(
                 position_key=position_key(signal_id, state.osi_symbol),
                 order_id=result.order_row_id,
@@ -298,21 +342,29 @@ class Engine:
             acted += 1
         return acted
 
+    def _sync_orders(self) -> None:
+        if self.mode is Mode.LIVE:
+            self.broker.sync_orders()
+
     def _exit_loop(self, day: date) -> None:
-        states = self._positions_state(day)
-        if not states:
-            self.log.info("no open positions to manage")
-            return
-        window_end = max(s.hard_exit_at for s, _ in states)
-        self.log.info("exit loop until %s", clock.to_market(window_end).isoformat())
+        # Pending entries still need monitoring even before the first fill arrives.
         while True:
             self._exit_tick(day)
-            if not self.store.open_positions():
-                self.log.info("all positions closed")
+            pending = self.store.orders_open(self.mode.value)
+            positions = self.store.open_positions(self.mode.value)
+            if not positions and not pending:
+                self.log.info("all positions closed and orders settled")
                 return
-            if self._now() >= window_end:
-                self.log.info("exit window ended; %d position(s) still open", len(self.store.open_positions()))
-                return
+            if self.mode is Mode.LIVE:
+                for order in pending:
+                    if order["intent"] != "ENTRY":
+                        continue
+                    ac = self._asset_class_for(order["signal_id"], {})
+                    _, end = self.cal.exit_window(day, ac, self.rules)
+                    if self._now() >= end:
+                        self.broker.cancel_entry(order)
+            if self._now() >= self.cal.session_close(day):
+                raise RuntimeError("Market closed with unsettled orders or positions; check Schwab before restarting")
             self._sleep(self.rules.poll_interval_seconds)
 
     # -- helpers --------------------------------------------

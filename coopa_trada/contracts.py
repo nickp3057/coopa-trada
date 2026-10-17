@@ -78,13 +78,17 @@ class ContractResolver:
         if self.ratelimiter is not None:
             self.ratelimiter.acquire()
 
+        from schwab.client import Client
+        from .broker import _check_response
+
         resp = self.client.get_option_chain(
             symbol=signal.underlying,
-            contract_type=signal.right.value,  # "CALL" / "PUT"
+            contract_type=Client.Options.ContractType[signal.right.value],  # "CALL" / "PUT"
             strike=signal.strike,
             from_date=signal.expiration,
             to_date=signal.expiration,
         )
+        _check_response(resp)
         payload = resp.json() if hasattr(resp, "json") else resp
         raw = self._locate(payload, signal)
         if raw is None:
@@ -96,7 +100,8 @@ class ContractResolver:
         bid = float(raw.get("bid") or 0.0)
         ask = float(raw.get("ask") or 0.0)
         tradable = bool(raw.get("tradable", True)) and not raw.get("nonStandard", False)
-        if bid <= 0 or ask <= 0 or not tradable:
+        import math
+        if not math.isfinite(bid) or not math.isfinite(ask) or bid <= 0 or ask <= 0 or bid > ask or not tradable:
             raise ContractNotTradable(
                 f"signal {signal.id}: contract not two-sided/tradable (bid={bid}, ask={ask}, tradable={tradable})"
             )

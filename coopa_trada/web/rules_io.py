@@ -1,213 +1,142 @@
-"""Read and write ``config/rules.yaml`` for the settings screen.
-
-Validation is **not** duplicated here: a candidate is written to a temp file
-and handed to :func:`coopa_trada.rules.load_rules`, which is the single
-authority on every range. Only if that passes is ``config/rules.yaml``
-rewritten -- from a fixed template (a static header + the permanent
-"ambiguous pending Cooper" note), since PyYAML cannot preserve the comments
-already in the file.
-"""
-
+"""Settings serialization. Trading values are editable; confirmation markers are file-only."""
 from __future__ import annotations
 
 import os
 import re
 import tempfile
-from datetime import datetime, timezone
+from dataclasses import asdict
 from pathlib import Path
 
 import yaml
 
-from ..rules import load_rules
+from ..rules import DeltaFilter, default_settings_metadata, load_rules, setting_confirmations
 
-__all__ = ["RulesValidationError", "read_rules_dict", "write_rules", "AMBIGUOUS_KEYS"]
-
-# The two keys that encode the same still-unresolved "sell if it drops 10%"
-# instruction (see README). Both stay live at once until Cooper confirms which
-# he meant; this is surfaced in the UI as a plain sentence, not a code change.
-AMBIGUOUS_KEYS = ("cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct")
-
-AMBIGUOUS_NOTE = (
-    "cooper_drop_from_peak_pct and cooper_drop_from_entry_pct are two readings "
-    "of the same instruction from Cooper -- \"sell if it drops 10%\" -- one "
-    "measured as a retrace from the session peak, the other as a drop from the "
-    "entry price. Both are active simultaneously right now; whichever triggers "
-    "first wins. One of them should be removed once Cooper confirms which he "
-    "meant, and whether it replaces the 25% / 40% / 60% exits."
+STOP_KEYS = ("cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct")
+DEFAULT_STOP_NOTE = (
+    "Default chosen in Cooper's absence: a 10% retrace from the session peak. "
+    'His wording ("exit at the high", "drops 10% between the times I said") suggests this reading. '
+    "Because the observed peak is at least the entry price, its 10% trigger is at least as high: "
+    "it is the earlier, tighter exit when the peak exceeds entry. Both fields are editable; "
+    "blank disables a field. If both are set, both are active and the first trigger wins. "
+    "The standard 25% / 40% / 60% exits remain active alongside it: adding triggers can "
+    "make an exit earlier, never later. Confirm these defaults with Cooper before a live run."
 )
-
+SPENDING_COMMENT = """# Spending cap per pick. Always buys exactly 1 contract; if that contract
+# costs more than this, the ticker is skipped entirely.
+# DEFAULT, NOT CONFIRMED BY COOPER -- $300 is a number he mentioned once and
+# never confirmed. Adjust freely.
+"""
+DELTA_COMMENT = """# Delta filtering. Off by default -- we assume Cooper's source already screens
+# on delta and sends only the picks it wants traded.
+# DEFAULT, NOT CONFIRMED BY COOPER.
+# This is a curated pick list from a paid service. We assume the delta columns
+# document upstream selections; filtering here would discard paid-for picks.
+# TVT-DELTA appears to use 0-100, not Schwab's 0-1 scale. For source: tvt,
+# both thresholds must be > 1.0 (e.g. 30 and 80); no automatic rescaling.
+"""
 _REQUIRED_NUMERIC = {
-    "entry_minutes_before_close": int,
-    "trailing_stop_pct": float,
-    "hard_stop_loss_pct": float,
-    "take_profit_pct": float,
-    "max_concurrent_positions": int,
-    "max_dollars_per_position": float,
+    "entry_minutes_before_close": int, "trailing_stop_pct": float,
+    "hard_stop_loss_pct": float, "take_profit_pct": float,
+    "max_concurrent_positions": int, "max_dollars_per_position": float,
     "poll_interval_seconds": int,
 }
 
-# The order keys are written back to rules.yaml (readability only; load order
-# does not matter). exit_window is slotted in after entry_minutes_before_close.
-_WRITE_ORDER = (
-    "entry_minutes_before_close",
-    "exit_window",
-    "trailing_stop_pct",
-    "hard_stop_loss_pct",
-    "take_profit_pct",
-    "cooper_drop_from_peak_pct",
-    "cooper_drop_from_entry_pct",
-    "max_concurrent_positions",
-    "max_dollars_per_position",
-    "poll_interval_seconds",
-)
-
 
 class RulesValidationError(ValueError):
-    """A proposed rules payload failed ``load_rules`` validation."""
+    """A proposed settings payload failed validation."""
 
 
-def _endpoint(value) -> int | str:
-    """A bare integer means 'minutes before close'; anything else stays a string
-    (``load_rules`` is what actually validates the ``HH:MM`` form)."""
+def _endpoint(value):
     s = str(value).strip()
     return int(s) if re.fullmatch(r"\d+", s) else s
 
 
-def read_rules_dict(config_path: str | os.PathLike) -> dict:
-    """Current rules as a JSON-serialisable dict, plus UI metadata.
-
-    Never raises for a merely-invalid on-disk file: the values are still
-    returned, with a ``warning`` describing why ``load_rules`` rejected it.
-    """
+def read_rules_dict(config_path) -> dict:
     path = Path(config_path)
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-
     warning = None
     try:
         load_rules(path)
-    except (ValueError, OSError) as exc:
+    except (ValueError, TypeError, OSError) as exc:
         warning = str(exc)
-
-    exit_window = {}
-    for key, pair in (raw.get("exit_window") or {}).items():
-        if isinstance(pair, (list, tuple)) and len(pair) == 2:
-            exit_window[str(key)] = [_endpoint(pair[0]), _endpoint(pair[1])]
-
-    out = {
-        "entry_minutes_before_close": raw.get("entry_minutes_before_close"),
-        "exit_window": exit_window,
-        "trailing_stop_pct": raw.get("trailing_stop_pct"),
-        "hard_stop_loss_pct": raw.get("hard_stop_loss_pct"),
-        "take_profit_pct": raw.get("take_profit_pct"),
-        "max_concurrent_positions": raw.get("max_concurrent_positions"),
-        "max_dollars_per_position": raw.get("max_dollars_per_position"),
-        "poll_interval_seconds": raw.get("poll_interval_seconds"),
-        "cooper_drop_from_peak_pct": raw.get("cooper_drop_from_peak_pct"),
-        "cooper_drop_from_entry_pct": raw.get("cooper_drop_from_entry_pct"),
-        "ambiguous_keys": list(AMBIGUOUS_KEYS),
-        "ambiguous_note": AMBIGUOUS_NOTE,
-        "warning": warning,
-        "path": str(path),
-    }
+    markers = setting_confirmations(raw.get("setting_confirmations"))
+    out = {key: raw.get(key) for key in (*_REQUIRED_NUMERIC, *STOP_KEYS)}
+    out.update(
+        exit_window={key: [_endpoint(v) for v in pair] for key, pair in (raw.get("exit_window") or {}).items()},
+        delta_filter={**asdict(DeltaFilter()), **(raw.get("delta_filter") or {})},
+        setting_confirmations=markers,
+        default_settings=default_settings_metadata(markers),
+        stop_keys=list(STOP_KEYS), default_stop_note=DEFAULT_STOP_NOTE,
+        warning=warning, path=str(path),
+    )
     return out
 
 
 def _coerce_payload(payload: dict) -> dict:
-    """Turn a settings-form payload into a plain mapping ready for YAML.
-
-    Raises ``RulesValidationError`` for structurally broken input (missing key,
-    non-numeric where a number is required). Range checks are left to
-    ``load_rules``.
-    """
     if not isinstance(payload, dict):
         raise RulesValidationError("expected a JSON object")
-
-    out: dict = {}
+    out = {}
     for key, caster in _REQUIRED_NUMERIC.items():
         if key not in payload or payload[key] in (None, ""):
             raise RulesValidationError(f"missing value for {key}")
         try:
             out[key] = caster(payload[key])
-        except (TypeError, ValueError):
-            raise RulesValidationError(
-                f"{key} must be {'an integer' if caster is int else 'a number'}"
-            ) from None
-
-    ew_in = payload.get("exit_window")
-    if not isinstance(ew_in, dict) or not ew_in:
+        except (TypeError, ValueError, OverflowError):
+            raise RulesValidationError(f"{key} must be a number") from None
+    windows = payload.get("exit_window")
+    if not isinstance(windows, dict) or not windows:
         raise RulesValidationError("exit_window must have at least one asset class")
-    ew_out: dict = {}
-    for cls, pair in ew_in.items():
+    out["exit_window"] = {}
+    for key, pair in windows.items():
         if not isinstance(pair, (list, tuple)) or len(pair) != 2:
-            raise RulesValidationError(f"exit_window[{cls}] must be a [start, end] pair")
-        ew_out[str(cls)] = [_endpoint(pair[0]), _endpoint(pair[1])]
-    out["exit_window"] = ew_out
-
-    for key in AMBIGUOUS_KEYS:
-        val = payload.get(key)
-        if val in (None, "", "null"):
-            continue
+            raise RulesValidationError(f"exit_window[{key}] must be a [start, end] pair")
+        out["exit_window"][key] = [_endpoint(v) for v in pair]
+    for key in STOP_KEYS:
+        value = payload.get(key)
         try:
-            out[key] = float(val)
+            out[key] = None if value in (None, "", "null") else float(value)
         except (TypeError, ValueError):
             raise RulesValidationError(f"{key} must be a number or blank") from None
-
+    try:
+        out["delta_filter"] = asdict(DeltaFilter.from_config(payload.get("delta_filter")))
+    except (ValueError, TypeError) as exc:
+        raise RulesValidationError(str(exc)) from None
     return out
 
 
 def _render_yaml(body: dict) -> str:
-    header = (
-        "# Coopa Trada trading rules.\n"
-        f"# Rewritten by the Coopa Trada web UI at {datetime.now(timezone.utc).isoformat()}.\n"
-        "# The UI regenerates this whole file (comments included) on every save,\n"
-        "# so hand-edited comments here will not survive the next save from the UI.\n"
-        "# Every value below is validated on load -- see coopa_trada/rules.py.\n"
-        "#\n"
-        "# NOTE (pending Cooper): cooper_drop_from_peak_pct and\n"
-        "# cooper_drop_from_entry_pct are two readings of the same \"sell if it\n"
-        "# drops 10%\" instruction (retrace from the session peak vs. drop from\n"
-        "# entry). Both are live at once right now; whichever triggers first wins.\n"
-        "# Remove one once Cooper confirms which he meant.\n\n"
-    )
-
-    lines: list[str] = []
-    for key in _WRITE_ORDER:
-        if key not in body:
-            continue
-        if key == "exit_window":
-            lines.append("exit_window:")
-            for cls, pair in body["exit_window"].items():
-                rendered = ", ".join(
-                    repr(p) if isinstance(p, str) else str(p) for p in pair
-                )
-                lines.append(f"  {cls}: [{rendered}]")
-        else:
-            lines.append(yaml.safe_dump({key: body[key]}, default_flow_style=False).strip())
-    return header + "\n".join(lines) + "\n"
+    comments = {
+        "cooper_drop_from_peak_pct": "\n".join("# " + line for line in [DEFAULT_STOP_NOTE]) + "\n",
+        "max_dollars_per_position": SPENDING_COMMENT,
+        "delta_filter": DELTA_COMMENT,
+        "setting_confirmations": "# File-only confirmation markers. Settings preserves these; the UI cannot dismiss them.\n",
+    }
+    text = "# Coopa Trada rules. Values below are adjustable; unconfirmed defaults are warnings, not live gates.\n"
+    for key, value in body.items():
+        text += comments.get(key, "")
+        text += yaml.safe_dump({key: value}, sort_keys=False)
+    return text
 
 
-def write_rules(config_path: str | os.PathLike, payload: dict) -> dict:
-    """Validate ``payload`` via ``load_rules`` then atomically rewrite the file.
-
-    Returns the fresh :func:`read_rules_dict`. Raises ``RulesValidationError``
-    (never a traceback) on any bad value.
-    """
+def write_rules(config_path, payload: dict) -> dict:
     body = _coerce_payload(payload)
-
-    fd, tmp_name = tempfile.mkstemp(suffix=".yaml")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            yaml.safe_dump(body, fh, sort_keys=False, default_flow_style=False)
-        try:
-            load_rules(tmp_name)
-        except ValueError as exc:
-            raise RulesValidationError(str(exc)) from None
-    finally:
-        os.unlink(tmp_name)
-
     target = Path(config_path)
-    tmp_target = target.with_name(target.name + ".tmp")
-    tmp_target.write_text(_render_yaml(body), encoding="utf-8")
-    os.replace(tmp_target, target)
-
-    return read_rules_dict(config_path)
+    current = yaml.safe_load(target.read_text(encoding="utf-8")) or {}
+    # Never accept marker changes through the API, even if a forged payload sends them.
+    body["setting_confirmations"] = setting_confirmations(current.get("setting_confirmations"))
+    # Preserve the existing filter if an older API client omits it.
+    if "delta_filter" not in payload:
+        body["delta_filter"] = asdict(DeltaFilter.from_config(current.get("delta_filter")))
+    fd, temporary = tempfile.mkstemp(dir=target.parent, suffix=".yaml")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(_render_yaml(body))
+        try:
+            load_rules(temporary)
+        except (ValueError, TypeError) as exc:
+            raise RulesValidationError(str(exc)) from None
+        os.replace(temporary, target)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+    return read_rules_dict(target)

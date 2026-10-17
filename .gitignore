@@ -19,3 +19,6 @@ dist/
 
 # os / editor
 .DS_Store
+
+# Reviewed uploads
+imports/

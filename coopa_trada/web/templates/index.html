@@ -2,6 +2,20 @@
 {% block title %} &middot; Dashboard{% endblock %}
 {% block content %}
 <section class="card">
+  <h1>Upload your picks</h1>
+  <p class="hint">Upload Cooper’s CSV or a screenshot of the five-column table. Check every contract and the full dates before selecting the list.</p>
+  <div class="row"><input id="picks-file" type="file" accept=".csv,.jpg,.jpeg,.png" aria-label="Picks file"><button id="picks-upload" class="btn">Read file</button></div>
+  <div class="row">
+    <label>Trade date <input id="picks-date" type="date" required></label>
+    <label>Expiration <input id="picks-expiration" type="date" required></label>
+  </div>
+  <label class="block" for="picks-csv">Extracted picks — correct any reading errors here</label>
+  <textarea id="picks-csv" rows="10" spellcheck="false" placeholder="SYMBOL,OPTION,LAST PRICE,TVT-DELTA,SCHWAB DELTA"></textarea>
+  <div class="row"><button id="picks-preview" class="btn">Preview picks</button><button id="picks-confirm" class="btn btn-primary" disabled>Confirm and select these picks</button></div>
+  <p id="picks-message" role="status"></p>
+  <div id="picks-table" class="table-wrap"></div>
+</section>
+<section class="card">
   <h1>Run control</h1>
   <pre id="banner" class="banner">loading&hellip;</pre>
   <div class="row">
@@ -41,4 +55,4 @@
   <div id="token-reconnect" class="hint" hidden></div>
 </section>
 {% endblock %}
-{% block script %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script>{% endblock %}
+{% block script %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script><script src="{{ url_for('static', filename='imports.js') }}"></script>{% endblock %}
