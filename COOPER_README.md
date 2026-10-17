@@ -67,6 +67,43 @@ the same folder as the app. Nick will give you the values.
 If it says Schwab did not accept the login, click **Reconnect Schwab** again and
 repeat. Paste quickly.
 
+### 2c. Alerts on your Mac and phone
+
+When something needs you, the app doesn't just wait for you to look at the
+Dashboard. It **sends an alert**:
+
+- an order Schwab may or may not have received (it is never resent),
+- a sell order that failed or isn't filling,
+- a crash or restart that left something for you to decide,
+- the Schwab login running out within 2 days, or not lasting through the next run,
+- a run that was refused, or that stopped with an error.
+
+**Mac notifications** are always on. The first one may ask whether to allow
+notifications (they can show up as coming from **Script Editor**). Click **Allow**.
+If you never see them, open **System Settings → Notifications**, find **Script
+Editor**, and turn **Allow notifications** on. Focus / Do Not Disturb hides them.
+
+**Phone alerts (optional)** use the free **ntfy** app:
+
+1. Nick makes you a private channel name. It must be long and random, because
+   anyone who knows the name can read the alerts. Nick runs this once in Terminal:
+
+   ```
+   python3 -c "import secrets; print('coopa-' + secrets.token_urlsafe(24))"
+   ```
+
+   It prints something like `coopa-q3Vh9...` (38 characters). Don't use a short
+   or made-up name; the app refuses names under 24 characters.
+2. Add a line to your `.env` file (section 2a): `NTFY_TOPIC=` followed by that name.
+3. On your phone, install **ntfy** (App Store or Google Play), tap **+**, and
+   subscribe to the same name. Leave the server as **ntfy.sh**.
+4. Quit and reopen the app, open **Settings → Alerts**, and click **Send test
+   alert**. You should get it on both the Mac and the phone.
+
+Alerts never contain account numbers, dollar amounts or links; they say what
+happened and where to look. The same alert is repeated at most every 6 hours
+(12 for the Schwab login) while the problem lasts.
+
 ---
 
 ## 3. Every trading day
@@ -134,6 +171,7 @@ Friday morning**, then a Friday run is always covered.
 | **Schwab: Connected** | Logged in | Nothing |
 | **Schwab: Expiring soon** | Under 2 days of login left | Reconnect soon (section 4) |
 | **Schwab: Expired** | Login ran out | Reconnect now |
+| **An alert on your Mac or phone** | Something needs you; the alert says what | Open the Dashboard and follow it |
 | **Red banner: "This login runs out before the next run is finished"** | The login would lapse before the bot sells on the next trading day | Reconnect before starting the run |
 | **Schwab: Not set up** | No login saved yet, or the settings file is missing | Do section 2 |
 | **Red banner: orders need your attention** | The bot sent an order but could not confirm whether Schwab received it. It did **not** resend it, and it stopped trading that option. | Open **Reconcile**, check **Orders** in your Schwab app, then click what you found |

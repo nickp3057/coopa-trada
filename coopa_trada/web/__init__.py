@@ -20,7 +20,8 @@ from .views import bp
 __all__ = ["create_app", "WebPaths", "EngineRunner"]
 
 
-def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None) -> Flask:
+def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None,
+               alerter=None) -> Flask:
     import secrets
     from urllib.parse import urlsplit
     from flask import request, jsonify
@@ -38,7 +39,12 @@ def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None
     def oversized(_error):
         return jsonify(error="File is too large; the limit is 8 MB"), 413
 
+    from .. import alerts
     app.config["COOPA_PATHS"] = paths or paths_from_env()
-    app.config["COOPA_RUNNER"] = runner or EngineRunner(app.config["COOPA_PATHS"])
+    app.config["COOPA_ALERTER"] = alerter or alerts.from_env()
+    runner = runner or EngineRunner(app.config["COOPA_PATHS"])
+    if runner.alerter is None:
+        runner.alerter = app.config["COOPA_ALERTER"]
+    app.config["COOPA_RUNNER"] = runner
     app.register_blueprint(bp)
     return app

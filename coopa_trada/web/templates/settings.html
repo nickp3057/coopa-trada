@@ -103,5 +103,21 @@
     </div>
   </form>
 </section>
+
+<section class="card" id="alerts-card">
+  <h2>Alerts</h2>
+  <p class="hint">When something needs a person (an order Schwab may not have received, a sell
+    that failed or isn&rsquo;t filling, a crash that left something to decide, the Schwab login
+    running out, a run refused or stopped by an error), the app sends a Mac notification and,
+    if set up, a push to your phone through the ntfy app. Alerts never include account
+    numbers or dollar amounts.</p>
+  <ul id="alert-channels" class="plain-list"></ul>
+  <div class="row">
+    <button type="button" id="btn-test-alert" class="btn">Send test alert</button>
+    <span id="alert-msg" class="msg" role="status"></span>
+  </div>
+  <h3>Recent alerts</h3>
+  <ul id="alert-recent" class="plain-list"><li class="hint">None since the app started.</li></ul>
+</section>
 {% endblock %}
 {% block script %}<script src="{{ url_for('static', filename='settings.js') }}"></script>{% endblock %}

@@ -12,6 +12,7 @@ Environment:
 from __future__ import annotations
 
 import argparse
+import os
 
 from ..config import load_env
 from . import create_app
@@ -25,8 +26,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--debug", action="store_true", help="Flask debug reloader")
     args = parser.parse_args(argv)
 
+    from ..watchdog import Watchdog
+
     app = create_app()
     paths = app.config["COOPA_PATHS"]
+    if not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        # Once per serving process (the debug reloader starts a second one).
+        app.config["COOPA_WATCHDOG"] = Watchdog(paths, app.config["COOPA_RUNNER"],
+                                                app.config["COOPA_ALERTER"]).start()
     print(
         f"Coopa Trada UI on http://{args.host}:{args.port}\n"
         f"  rules   : {paths.config_path}\n"

@@ -155,8 +155,13 @@ def main(argv: list[str] | None = None) -> int:
     from werkzeug.serving import make_server
     from .web import create_app
 
+    from .watchdog import Watchdog
+
     app = create_app()
     server = make_server("127.0.0.1", port, app, threaded=True)
+    watchdog = Watchdog(app.config["COOPA_PATHS"], app.config["COOPA_RUNNER"],
+                        app.config["COOPA_ALERTER"]).start()
+    app.config["COOPA_WATCHDOG"] = watchdog
     app.config["COOPA_HOME"] = str(home)
     # Delayed so the "has quit" reply finishes sending before the server stops.
     app.config["COOPA_SHUTDOWN"] = lambda: threading.Timer(0.5, server.shutdown).start()
@@ -174,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         deadline = time.monotonic() + 10
         while runner.status == "running" and time.monotonic() < deadline:
             time.sleep(0.1)
+        watchdog.stop()
     return 0
 
 

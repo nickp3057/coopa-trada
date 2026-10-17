@@ -17,6 +17,7 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from typing import Callable
 
+from ..alerts import Alerter, Stopped, report_failure
 from ..calendar_svc import CalendarService
 from ..config import Mode, resolve_mode
 from ..wiring import build_engine, parse_trading_date
@@ -29,7 +30,7 @@ class RunnerBusy(RuntimeError):
     """start() called while a run is already in progress."""
 
 
-class RunStopped(Exception):
+class RunStopped(Stopped):
     """Internal: raised through the sleep hook to unwind engine.run on stop."""
 
 
@@ -43,9 +44,11 @@ class EngineRunner:
         paths: WebPaths,
         *,
         now: Callable[[], datetime] | None = None,
+        alerter: Alerter | None = None,
     ):
         self._paths = paths
         self._now = now  # test hook: pins the engine clock
+        self.alerter = alerter  # set by create_app when not given
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -97,6 +100,8 @@ class EngineRunner:
 
     def _run(self, live: bool, date_str: str | None, paths: WebPaths) -> None:
         store = None
+        engine = None
+        mode = None
         try:
             mode = resolve_mode(live)  # DRY-RUN unless live AND LIVE_TRADING=1
             self.mode = mode.value
@@ -111,6 +116,7 @@ class EngineRunner:
                 db_path=paths.db_path,
                 sleep=self._sleep,
                 now=self._now,
+                alerter=self.alerter,
             )
             engine.run(day)
             self.last_result = "run complete"
@@ -118,6 +124,9 @@ class EngineRunner:
             self.last_result = "stopped by user"
         except Exception as exc:  # surfaced in the UI, not a crash
             self.last_error = f"{type(exc).__name__}: {exc}"
+            # Engine.run alerts for its own failures; this covers the ones before it exists.
+            report_failure(self.alerter, exc, refused=engine is None or engine.phase == "starting",
+                           mode=mode.value if mode else "")
         finally:
             if store is not None:
                 try:

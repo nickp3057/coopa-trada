@@ -130,3 +130,39 @@ form.addEventListener("submit", async (ev) => {
 
 document.getElementById("btn-reload").addEventListener("click", load);
 load();
+
+// -- alerts ---------------------------------------------------------------
+function renderAlerts(body) {
+  const channels = document.getElementById("alert-channels");
+  channels.replaceChildren(...(body.channels || []).map((c) =>
+    CT.el("li", { class: c.configured ? "ok" : "hint", text: c.channel + ": " + c.detail })));
+  const recent = document.getElementById("alert-recent");
+  if (!body.recent || !body.recent.length) return;
+  recent.replaceChildren(...body.recent.map((a) =>
+    CT.el("li", { text: CT.fmtTime(a.at) + " · " + a.title + " · " + a.message })));
+}
+
+async function loadAlerts() {
+  const { ok, body } = await CT.get("/api/alerts");
+  if (ok) renderAlerts(body);
+}
+
+document.getElementById("btn-test-alert").addEventListener("click", async () => {
+  const out = document.getElementById("alert-msg");
+  out.textContent = "Sending…";
+  out.className = "msg";
+  const { ok, body } = await CT.post("/api/alerts/test", {});
+  if (!ok) {
+    out.textContent = body.error || "Could not send the test alert.";
+    out.className = "msg is-error";
+    return;
+  }
+  const sent = body.results.filter((r) => r.ok).map((r) => r.channel);
+  const failed = body.results.filter((r) => !r.ok).map((r) => r.channel + " (" + r.detail + ")");
+  out.textContent = (sent.length ? "Sent to: " + sent.join(", ") + ". " : "Nothing was sent. ") +
+    (failed.length ? "Not sent: " + failed.join("; ") : "");
+  out.className = "msg " + (sent.length ? (failed.length ? "warn" : "ok") : "is-error");
+  renderAlerts(body);
+});
+
+loadAlerts();

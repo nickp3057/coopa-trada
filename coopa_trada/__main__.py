@@ -75,15 +75,23 @@ def cmd_run(args) -> int:
         log.error("%s is not an XNYS trading day", day.isoformat())
         return 2
 
+    from . import alerts
+
+    alerter = alerts.from_env()
     # Same dependency graph the web UI builds -- see coopa_trada/wiring.py.
-    engine, store = build_engine(
-        mode=mode,
-        signals_path=args.signals,
-        config_path=args.config,
-        db_path=args.db,
-    )
     try:
-        engine.run(day, once=args.once)
+        engine, store = build_engine(
+            mode=mode,
+            signals_path=args.signals,
+            config_path=args.config,
+            db_path=args.db,
+            alerter=alerter,
+        )
+    except Exception as exc:
+        alerts.report_failure(alerter, exc, refused=True, mode=mode.value)
+        raise
+    try:
+        engine.run(day, once=args.once)  # alerts for its own refusals and errors
     finally:
         store.close()
     return 0

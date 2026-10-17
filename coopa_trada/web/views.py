@@ -334,6 +334,20 @@ def api_reconnect_finish():
     return jsonify(token_status(config_path=_paths().config_path))
 
 
+# -- alerts ---------------------------------------------------------
+@bp.get("/api/alerts")
+def api_alerts():
+    alerter = current_app.config["COOPA_ALERTER"]
+    return jsonify(channels=alerter.channels(), recent=list(alerter.recent))
+
+
+@bp.post("/api/alerts/test")
+def api_alerts_test():
+    alerter = current_app.config["COOPA_ALERTER"]
+    results = alerter.test()
+    return jsonify(results=results, channels=alerter.channels(), recent=list(alerter.recent))
+
+
 # -- mode banner --------------------------------------------------
 @bp.get("/api/mode")
 def api_mode():

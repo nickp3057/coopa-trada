@@ -175,3 +175,28 @@ in `.venv/lib/python3.14/site-packages/schwab/auth.py`:
 - `docs/WINDOWS_BUILD.md`: what a Windows build would need (not built).
 - `COOPER_README.md`: install, first Schwab login, daily workflow, weekly reconnect,
   what each status means.
+
+## Alerts
+
+- `coopa_trada/alerts.py`: an `Alerter` sends each alert to every channel, scrubbed
+  (`scrub` removes links, `$` amounts, numbers after money words, 16+ character hex
+  IDs and any run of 5+ digits) and de-duplicated by key (repeats at most every 6 h;
+  12 h for login warnings). A failing channel is logged and never raises into trading.
+  - `MacNotifier`: `osascript` with the text passed as arguments (never as script).
+    Always on when running on macOS.
+  - `NtfyNotifier`: optional JSON POST to `https://ntfy.sh` (or `NTFY_SERVER`, https
+    only) when `NTFY_TOPIC` is set. Topics under 24 characters are refused.
+  - `COOPA_TRADA_ALERTS_LOG_ONLY=1` swaps every channel for the log; it is set only by
+    `packaging/verify_app.py`. Settings shows when it is on.
+- Fired by the engine: entry/exit order outcome unknown or not placed; exit order
+  REJECTED/CANCELED/EXPIRED/NOT_PLACED/ERROR with the position still open; exit order
+  working 3+ minutes without filling; any run failure (refused before the entry pass,
+  including the entry-time login re-check, or an error after it). The web runner and
+  CLI alert for failures before the engine exists. A person pressing Stop never alerts.
+- Fired by `coopa_trada/watchdog.py` (a background thread in the desktop app and
+  `python -m coopa_trada.web`, every 60 s): login expiring within 2 days, expired, or
+  not covering the next run's hold; a stale lock from a LIVE run; LIVE positions open
+  while no run is active; and, on the first check after startup, unresolved order incidents.
+- Settings → Alerts lists the channels, has **Send test alert**, and shows recent alerts.
+- Tests replace `alerts._osascript` and `alerts._post` for every test (`tests/conftest.py`).
+  No real notification or ntfy request is made by the suite.

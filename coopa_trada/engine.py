@@ -10,10 +10,11 @@ from __future__ import annotations
 import time as _time
 from contextlib import ExitStack
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Callable
 
 from . import clock
+from .alerts import Alerter, contract_text, report_failure
 from .config import Mode
 from .broker import OrderNotPlaced, OrderOutcomeUnknown
 from .contracts import ContractNotTradable, ContractUnderspecified
@@ -34,6 +35,11 @@ from .schwab_token import hold_needed_until, start_block_reason
 from .store import Store, position_key
 
 __all__ = ["Engine", "SyntheticQuoteSource", "ReconcileReport"]
+
+# An exit order still working this long after it was placed gets an alert.
+EXIT_UNFILLED_ALERT = timedelta(minutes=3)
+# Exit orders that ended without selling; the position is still open.
+_FAILED_EXIT_STATUSES = {"REJECTED", "CANCELED", "CANCELLED", "EXPIRED", "NOT_PLACED", "ERROR"}
 
 
 class SyntheticQuoteSource:
@@ -94,6 +100,7 @@ class Engine:
         now: Callable[[], datetime] = clock.now_utc,
         token_status=None,
         sleep: Callable[[float], None] = _time.sleep,
+        alerter: Alerter | None = None,
     ):
         self.source = source
         self.resolver = resolver
@@ -110,6 +117,10 @@ class Engine:
         self._now = now
         self._sleep = sleep
         self.log = get_logger("coopa_trada.engine", mode)
+        # Anything a person must act on is also pushed to them (see alerts).
+        self.alerter = alerter if alerter is not None else Alerter()
+        # "starting" until the entry pass begins; a failure before then is a refused run.
+        self.phase = "starting"
 
         # Optional 10% readings coexist with the standard exits. First trigger wins.
         strategies: list = []
@@ -218,6 +229,14 @@ class Engine:
         return locks
 
     def run(self, day: date, *, once: bool = False) -> None:
+        self.phase = "starting"
+        try:
+            self._run_with_locks(day, once=once)
+        except Exception as exc:
+            report_failure(self.alerter, exc, refused=self.phase == "starting", mode=self.mode.value)
+            raise
+
+    def _run_with_locks(self, day: date, *, once: bool) -> None:
         with ExitStack() as held:
             for lock in self._run_locks():
                 held.enter_context(lock)
@@ -251,6 +270,7 @@ class Engine:
 
         if self.mode is Mode.LIVE and self._now() >= self.cal.session_close(day):
             raise ValueError("Cannot start a live run after market close")
+        self.phase = "trading"
         self._entry_pass(day)
 
         if once:
@@ -324,6 +344,7 @@ class Engine:
                 )
             except (OrderNotPlaced, OrderOutcomeUnknown) as exc:
                 self.log.error("ENTRY %s: %s", signal.id, exc)
+                self._alert_order_problem("buy", contract.osi_symbol, exc, key=f"entry:{signal.id}")
                 continue  # recorded for a person; never resubmitted
             if self.quote_source is not None and hasattr(self.quote_source, "register"):
                 self.quote_source.register(contract.osi_symbol, mid)
@@ -376,6 +397,7 @@ class Engine:
         acted = 0
         halted = self.store.halted_symbols(self.mode.value)
         for state, signal_id in self._positions_state(day):
+            self._check_exit_order(state, signal_id)
             if state.osi_symbol in halted:
                 self.log.warning("hold %s: halted until a person resolves an unknown order", state.osi_symbol)
                 continue
@@ -395,6 +417,7 @@ class Engine:
                 )
             except (OrderNotPlaced, OrderOutcomeUnknown) as exc:
                 self.log.error("EXIT %s: %s", signal_id, exc)
+                self._alert_order_problem("sell", state.osi_symbol, exc, key=f"exit:{signal_id}")
                 continue  # recorded for a person; never resubmitted
             if result.deduplicated:
                 continue
@@ -414,6 +437,46 @@ class Engine:
             )
             acted += 1
         return acted
+
+    # -- alerts ---------------------------------------------
+    def _alert_order_problem(self, side: str, osi_symbol: str, exc: Exception, *, key: str) -> None:
+        what = contract_text(osi_symbol)
+        if isinstance(exc, OrderOutcomeUnknown):
+            self.alerter.alert(
+                "order_unknown", f"Check Schwab: {side} order unclear",
+                f"The {side} order for {what} may or may not have reached Schwab. It was NOT resent, "
+                f"and this option is halted. Check Orders in Schwab, then say what you found on the "
+                f"Reconcile page.", key=key)
+        else:
+            self.alerter.alert(
+                "order_not_placed", f"{side.capitalize()} order not placed",
+                f"The {side} order for {what} never reached Schwab and was not resent. "
+                + ("The position is still open: sell it in Schwab if you want out. " if side == "sell" else "")
+                + "Acknowledge it on the Reconcile page.", key=key)
+
+    def _check_exit_order(self, state: PositionState, signal_id: str) -> None:
+        """Alert when this position's exit order failed, or is not filling."""
+        row = self.store.conn.execute(
+            "SELECT * FROM orders WHERE intent='EXIT' AND mode=? AND entry_order_id=? ORDER BY id DESC LIMIT 1",
+            (self.mode.value, state.entry_order_id)).fetchone()
+        if row is None:
+            return
+        what = contract_text(state.osi_symbol)
+        if row["status"] in _FAILED_EXIT_STATUSES:
+            self.alerter.alert(
+                "exit_failed", "Sell order failed",
+                f"The sell order for {what} ended as {row['status']} and the position is still open. "
+                f"The bot will not send another. Check Schwab and sell it there if you want out.",
+                key=f"exit:{signal_id}")
+        elif row["status"] not in ("UNKNOWN", "FILLED"):
+            age = self._now() - clock.parse_iso(row["created_at_utc"])
+            if age >= EXIT_UNFILLED_ALERT:
+                minutes = int(age.total_seconds() // 60)
+                self.alerter.alert(
+                    "exit_unfilled", "Sell order not filling",
+                    f"The sell order for {what} has been waiting {minutes} minutes without filling. "
+                    f"Check it in Schwab; the bot does not lower the price by itself.",
+                    key=f"exit-unfilled:{signal_id}")
 
     def _sync_orders(self) -> None:
         if self.mode is Mode.LIVE:

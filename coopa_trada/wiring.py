@@ -83,6 +83,7 @@ def build_engine(
     store: Store | None = None,
     now: Callable[[], datetime] | None = None,
     sleep: Callable[[float], None] | None = None,
+    alerter=None,
 ) -> tuple[Engine, Store]:
     """Assemble a fully wired :class:`Engine` plus the :class:`Store` it uses.
 
@@ -131,6 +132,8 @@ def build_engine(
         extra["token_status"] = partial(read_token_status, creds.token_path)
     if sleep is not None:
         extra["sleep"] = sleep
+    if alerter is not None:
+        extra["alerter"] = alerter
 
     engine = Engine(
         source=source,

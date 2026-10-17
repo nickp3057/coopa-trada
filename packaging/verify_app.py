@@ -83,6 +83,8 @@ class App:
             "TMPDIR": tempfile.gettempdir(),
             "COOPA_TRADA_NO_BROWSER": "1",
             "COOPA_TRADA_PORT": str(self.port),
+            # Alerts are exercised, but written to the log instead of popping up.
+            "COOPA_TRADA_ALERTS_LOG_ONLY": "1",
         }
         if self.target == "source":
             env["PYTHONPATH"] = str(ROOT)
