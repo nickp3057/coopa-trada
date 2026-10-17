@@ -2,9 +2,11 @@
 
 _Last updated: 2026-10-16_
 
-Local Python/Flask app for Cooper's FOMC Picks. CSV and macOS image upload now feed
-an editable preview, explicit dates, and a separate confirmation step. Uploading
-or confirming a list never starts trading. Simulation remains the default.
+Local Python/Flask app for Cooper's FOMC Picks, packaged as a double-click macOS
+app. CSV and macOS image upload feed an editable preview, explicit dates, and a
+separate confirmation step. Uploading or confirming a list never starts trading.
+Simulation remains the default. No real Schwab account, credentials or live
+orders have been used yet.
 
 ## Implemented in this revision
 
@@ -32,12 +34,21 @@ or confirming a list never starts trading. Simulation remains the default.
 
 ## Validation
 
-**135 automated tests pass** (`.venv/bin/python -m pytest`, `.venv` built from
+**210 automated tests pass** (`.venv/bin/python -m pytest`; `.venv` built from
 `requirements.txt` plus pytest). Coverage includes lifecycle, rejection, delayed
 fill, restart, mode isolation, account binding, spending cap at the ask, the live
-block per unconfirmed setting, dry runs ignoring it, confirmation persistence and
-reset, delta filter validation through Settings, upload validation, preview
-confirmation, and image recognition regression cases.
+block per unconfirmed setting, confirmation persistence and reset, delta filter
+validation, token states and the start gate, the mocked reconnect flow, process
+locks (with real subprocesses for concurrent and crashed holders), uncertain-order
+recovery, the desktop launcher, and upload/preview/image recognition.
+
+`packaging/build_macos.sh` built `dist/Coopa Trada.app` (arm64, 73 MB), and
+`packaging/verify_app.py --app` passed against it: dry run by default, the typed
+phrase, `LIVE_TRADING=1` from the `.env` next to the app, unconfirmed settings and
+a missing Schwab login each refused a live start, a dry run completed, and Quit
+exited cleanly. The bundled picture reader read all eight rows of a rendered
+sample picks table correctly. A real double-click launch (browser opening) and
+Gatekeeper on another Mac were not tested.
 
 Actual Apple Vision recognition was run locally on the supplied screenshot. All
 eight rows matched the corrected CSV. Safari was used to upload the original image,
@@ -52,12 +63,17 @@ Defaults below are in place and adjustable; each blocks live runs until confirme
 2. Entry-price vs peak-price interpretation of “drops 10%,” and whether it replaces
    the other exit rules (default: 10% from session peak, alongside the standard exits).
 3. Whether Cooper filters delta upstream (default: yes, so the in-app filter is off).
-4. Read-only Schwab verification, then supervised order-lifecycle checks on a real
-   account before considering unattended operation.
+4. The questions at the end of each section of `docs/OPEN_DESIGN.md`
+   (exit repricing, broker-side stops, leftovers after a crash).
+5. Read-only Schwab verification, then supervised order-lifecycle checks on a real
+   account before considering unattended operation. The reconnect flow and order
+   recovery have only run against mocks.
 
-The app does not automatically reprice an unfilled exit or recover an ambiguous
-submission. Stop means stop monitoring, not liquidate. Only one process should
-operate each account. See README for setup and operational limits.
+Not built yet (see `docs/OPEN_DESIGN.md`): repricing an unfilled exit, a broker-side
+protective stop, special handling for positions left over after a crash. Stop means
+stop monitoring, not liquidate. The Mac must stay awake during a run; the app
+does not prevent sleep. The app is not code-signed or notarized, so Cooper has to
+use Open Anyway on first launch. See README for setup and operational limits.
 
 ## Schwab login status and weekly reconnect
 
@@ -132,3 +148,24 @@ in `.venv/lib/python3.14/site-packages/schwab/auth.py`:
   being managed. An unresolved unknown order still keeps the day from finishing
   cleanly (it raises at the close), and if the order later shows up at Schwab,
   the next start's reconcile reports it as an untracked divergence and refuses to trade.
+
+## Double-click app (macOS)
+
+- `coopa_trada/desktop.py`: the folder containing `Coopa Trada.app` is the home
+  folder (`.env`, `config/`, `trada.db`, `schwab_token.json`, `logs/`). The first run
+  copies the example config and `env.example.txt` but never creates `.env`. Only the
+  `.env` next to the app is loaded. A double-click while the app is running reopens
+  the page. A macOS-translocated copy (run straight from Downloads) refuses with
+  move-the-app instructions. Quit is a button on every page and is refused mid-run.
+- `packaging/`: PyInstaller spec (one-folder `.app`, no Dock icon), a build script
+  that precompiles the Apple Vision helper with `swiftc` (so Cooper needs no Xcode
+  tools), and `verify_app.py`, which re-checks the live gates against the built app
+  or the source launcher (the latter also runs in pytest).
+- PyInstaller rather than py2app or Briefcase: it builds both macOS and Windows from
+  the same spec, it already handles this stack (pandas, Flask, schwab-py), and
+  one-folder builds start quickly. py2app is macOS-only. Briefcase targets native
+  GUI toolkits and adds little for a browser-based UI.
+- Off macOS, picture upload is disabled with a plain message and CSV upload still works.
+- `docs/WINDOWS_BUILD.md`: what a Windows build would need (not built).
+- `COOPER_README.md`: install, first Schwab login, daily workflow, weekly reconnect,
+  what each status means.

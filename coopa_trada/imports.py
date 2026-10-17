@@ -4,9 +4,11 @@ from __future__ import annotations
 import csv
 import io
 import json
+import os
 import platform
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import date
 from pathlib import Path
@@ -16,13 +18,47 @@ from .models import CsvSignalSource
 COLUMNS = ["SYMBOL", "OPTION", "LAST PRICE", "TVT-DELTA", "SCHWAB DELTA"]
 
 
+NOT_MAC_MESSAGE = ("Reading a picture of the picks table only works on a Mac (it uses Apple's "
+                   "built-in text recognition). On this computer, upload the CSV file instead.")
+NO_READER_MESSAGE = ("The picture reader is missing from this copy of Coopa Trada. Upload the CSV "
+                     "file instead, or reinstall the app.")
+
+
+def _compiled_helper() -> Path | None:
+    """The helper compiled at build time (packaging/build_macos.sh)."""
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+    for candidate in (base / "ocr" / "coopa-recognize", Path(__file__).with_name("ocr") / "coopa-recognize"):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
+def image_reader_command() -> list[str] | None:
+    """How to run Apple Vision here, or None when this computer cannot."""
+    if platform.system() != "Darwin":
+        return None
+    helper = _compiled_helper()
+    if helper is not None:
+        return [str(helper)]
+    if shutil.which("swift"):  # development: interpret the source (needs Xcode tools)
+        script = Path(__file__).with_name("ocr") / "recognize.swift"
+        return ["swift", "-module-cache-path", str(Path(tempfile.gettempdir()) / "coopa-swift-cache"), str(script)]
+    return None
+
+
+def image_reader_status() -> dict:
+    available = image_reader_command() is not None
+    reason = None if available else (NOT_MAC_MESSAGE if platform.system() != "Darwin" else NO_READER_MESSAGE)
+    return {"available": available, "reason": reason}
+
+
 def recognize_image(path: Path) -> str:
-    if platform.system() != "Darwin" or not shutil.which("swift"):
-        raise ValueError("Image reading currently requires macOS with Swift installed. Upload a CSV on this computer.")
-    helper = Path(__file__).with_name("ocr") / "recognize.swift"
+    command = image_reader_command()
+    if command is None:
+        raise ValueError(image_reader_status()["reason"])
     try:
         result = subprocess.run(
-            ["swift", "-module-cache-path", str(Path(tempfile.gettempdir()) / "coopa-swift-cache"), str(helper), str(path)],
+            [*command, str(path)],
             capture_output=True, text=True, timeout=90, check=True,
         )
         return cells_to_csv(json.loads(result.stdout))

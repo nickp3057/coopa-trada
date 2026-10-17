@@ -17,6 +17,12 @@
     table.replaceChildren();
   }
   [csv, day, expiration].forEach(el => el.addEventListener("input", invalidate));
+  // Pictures need Apple's text recognition; elsewhere, say so before anyone tries.
+  CT.get("/api/app").then(({ok, body}) => {
+    if (!ok || body.image_upload.available) return;
+    document.getElementById("picks-file").setAttribute("accept", ".csv");
+    message.textContent = body.image_upload.reason;
+  });
   upload.addEventListener("click", async () => {
     const file = document.getElementById("picks-file").files[0];
     if (!file) { message.textContent = "Choose a file first."; return; }

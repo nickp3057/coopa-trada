@@ -49,4 +49,20 @@ async function refreshModePill() {
   pill.classList.add(body.mode === "LIVE" ? "mode-live" : "mode-dry");
 }
 
+// The packaged app has no window of its own: quitting happens here.
+async function setupQuit() {
+  const footer = document.getElementById("app-footer");
+  if (!footer) return;
+  const { ok, body } = await CT.get("/api/app");
+  if (!ok || !body.can_quit) return;
+  footer.hidden = false;
+  document.getElementById("btn-quit").addEventListener("click", async () => {
+    const res = await CT.post("/api/app/quit", {});
+    const msg = document.getElementById("quit-msg");
+    msg.textContent = res.body.message || res.body.error || "";
+    msg.className = "msg " + (res.ok ? "ok" : "is-error");
+  });
+}
+
 document.addEventListener("DOMContentLoaded", refreshModePill);
+document.addEventListener("DOMContentLoaded", setupQuit);

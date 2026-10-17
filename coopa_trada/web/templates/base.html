@@ -19,6 +19,10 @@
   </header>
   <main class="container">
     {% block content %}{% endblock %}
+    <footer class="app-footer" id="app-footer" hidden>
+      <button id="btn-quit" class="btn">Quit Coopa Trada</button>
+      <span id="quit-msg" class="msg"></span>
+    </footer>
   </main>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
   {% block script %}{% endblock %}

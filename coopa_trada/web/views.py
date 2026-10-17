@@ -215,6 +215,26 @@ def api_reconcile():
     )
 
 
+# -- app identity, capabilities, quit (desktop launcher) ------------
+@bp.get("/api/app")
+def api_app():
+    from ..imports import image_reader_status
+    return jsonify(app="coopa-trada", home=current_app.config.get("COOPA_HOME"),
+                   can_quit=current_app.config.get("COOPA_SHUTDOWN") is not None,
+                   image_upload=image_reader_status())
+
+
+@bp.post("/api/app/quit")
+def api_app_quit():
+    shutdown = current_app.config.get("COOPA_SHUTDOWN")
+    if shutdown is None:
+        return jsonify(error="This server was not started by the Coopa Trada app; stop it where you started it."), 400
+    if _runner().status == "running":
+        return jsonify(error="A run is in progress. Press Stop and wait for it to finish before quitting."), 409
+    shutdown()
+    return jsonify(message="Coopa Trada has quit. You can close this tab.")
+
+
 # -- orders needing a person ----------------------------------------
 def _with_store(fn):
     store = Store.open(_paths().db_path)

@@ -99,6 +99,15 @@ an Unconfirmed badge and a Confirm checkbox for each, and the dashboard's live
 panel lists whatever is still unconfirmed. Changing a confirmed setting's value
 resets its marker unless the same save re-confirms it.
 
+## Double-click app (macOS)
+
+`packaging/build_macos.sh` compiles the Apple Vision helper with `swiftc`, builds
+`dist/Coopa Trada.app` with PyInstaller, then runs `packaging/verify_app.py`. That
+script launches the built app in a throwaway folder and checks that dry run is the
+default and every live gate still holds. The app keeps `.env`, `config/`, the
+database and the Schwab token in the folder that contains it. Cooper's guide is
+`COOPER_README.md`; Windows notes are in `docs/WINDOWS_BUILD.md`.
+
 ## CLI simulation
 
 ```bash
