@@ -10,8 +10,8 @@ elsewhere.
 
 from __future__ import annotations
 
-import json
 from datetime import date, datetime, timezone
+from functools import partial
 from pathlib import Path
 from typing import Callable
 
@@ -21,6 +21,7 @@ from .config import Mode, credentials_from_env
 from .engine import Engine, SyntheticQuoteSource
 from .models import CsvSignalSource
 from .rules import load_rules
+from .schwab_token import TokenState, read_token_status, start_block_reason
 from .store import Store
 
 __all__ = [
@@ -29,11 +30,6 @@ __all__ = [
     "build_engine",
     "token_status",
 ]
-
-# Refresh tokens minted by the schwab-py login flow are valid for 7 days from
-# creation. This is an operational trip-wire, not an API-enforced value here.
-REFRESH_TOKEN_LIFETIME_DAYS = 7
-
 
 class TokenMissing(RuntimeError):
     """No usable Schwab token on disk. Raised with a plain, non-traceback message."""
@@ -49,11 +45,11 @@ def parse_trading_date(value: str | None) -> date:
 # -- Schwab client (lazy; only touched on the LIVE path) ---------------------
 def schwab_client():
     creds = credentials_from_env()
-    if not creds.token_exists():
-        raise TokenMissing(
-            f"no Schwab token at {creds.token_path}. Run the one-time interactive "
-            f"login to mint it (see README), then retry."
-        )
+    # Checked before schwab-py loads the file, so no request is made with a
+    # missing, damaged or expired login.
+    reason = start_block_reason(read_token_status(creds.token_path), clock.now_utc())
+    if reason is not None:
+        raise TokenMissing(reason)
     try:
         from schwab.auth import client_from_token_file
     except ImportError as exc:  # pragma: no cover
@@ -130,6 +126,8 @@ def build_engine(
     extra: dict = {}
     if now is not None:
         extra["now"] = now
+    if mode is Mode.LIVE:
+        extra["token_status"] = partial(read_token_status, creds.token_path)
     if sleep is not None:
         extra["sleep"] = sleep
 
@@ -147,56 +145,25 @@ def build_engine(
     return engine, store
 
 
-def token_status(creds=None) -> dict:
-    """A read-only, never-raising summary of the Schwab token file.
+def token_status(creds=None, now: datetime | None = None) -> dict:
+    """A read-only, never-raising summary of the Schwab token file for the UI.
 
-    The 7-day refresh-token expiry is a real operational risk in this project,
-    so the UI needs to see it coming. This inspects the file only -- it never
-    refreshes, never contacts Schwab, and degrades to ``error`` text rather
-    than throwing.
+    Wraps :func:`coopa_trada.schwab_token.read_token_status`; it never
+    refreshes the token and never contacts Schwab.
     """
     if creds is None:
         creds = credentials_from_env()
-    path = Path(creds.token_path)
-    out: dict = {
-        "present": False,
-        "path": str(path),
-        "creation_age_days": None,
-        "refresh_expires_in_days": None,
-        "stale": True,
-        "error": None,
-    }
-    if not path.is_file():
-        out["error"] = "no token file on disk"
-        return out
-
-    out["present"] = True
-    try:
-        raw = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError) as exc:
-        out["error"] = f"token file unreadable: {exc}"
-        return out
-
-    created = raw.get("creation_timestamp")
-    if created is None:
-        # Fall back to the file's own mtime -- less accurate but still a signal.
-        try:
-            created = path.stat().st_mtime
-            out["error"] = "no creation_timestamp in token; using file mtime"
-        except OSError as exc:  # pragma: no cover
-            out["error"] = f"cannot stat token file: {exc}"
-            return out
-
-    try:
-        created_dt = datetime.fromtimestamp(float(created), tz=timezone.utc)
-    except (TypeError, ValueError, OSError) as exc:
-        out["error"] = f"bad creation timestamp {created!r}: {exc}"
-        return out
-
-    age_days = (datetime.now(timezone.utc) - created_dt).total_seconds() / 86400.0
-    remaining = REFRESH_TOKEN_LIFETIME_DAYS - age_days
-    out["creation_age_days"] = round(age_days, 2)
-    out["refresh_expires_in_days"] = round(remaining, 2)
-    # Amber within a day of expiry; red once past it.
-    out["stale"] = remaining <= 1.0
+    status = read_token_status(creds.token_path, now)
+    remaining = status.seconds_remaining
+    out = status.to_dict()
+    out.update(
+        present=Path(creds.token_path).is_file(),
+        creation_age_days=(round((status.checked_at - status.created_at).total_seconds() / 86400, 2)
+                           if status.created_at else None),
+        refresh_expires_in_days=round(remaining / 86400, 2) if remaining is not None else None,
+        stale=status.state is not TokenState.CONNECTED,
+        error=(None if status.created_at else
+               "no token file on disk" if not Path(creds.token_path).is_file() else status.message),
+        app_configured=bool(creds.api_key and creds.app_secret and creds.callback_url),
+    )
     return out

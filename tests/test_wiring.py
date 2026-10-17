@@ -105,7 +105,8 @@ def test_token_status_garbage_json(tmp_path):
 
 def test_token_status_fresh_and_stale(tmp_path):
     fresh = tmp_path / "fresh.json"
-    fresh.write_text(json.dumps({"creation_timestamp": datetime.now(timezone.utc).timestamp()}))
+    fresh.write_text(json.dumps({"creation_timestamp": datetime.now(timezone.utc).timestamp(),
+                                 "token": {"refresh_token": "fake"}}))
     st = token_status(_creds(fresh))
     assert st["present"] and st["error"] is None
     assert st["stale"] is False
@@ -113,7 +114,7 @@ def test_token_status_fresh_and_stale(tmp_path):
 
     old = tmp_path / "old.json"
     old_ts = datetime.now(timezone.utc).timestamp() - 8 * 86400
-    old.write_text(json.dumps({"creation_timestamp": old_ts}))
+    old.write_text(json.dumps({"creation_timestamp": old_ts, "token": {"refresh_token": "fake"}}))
     st = token_status(_creds(old))
     assert st["stale"] is True
     assert st["refresh_expires_in_days"] < 0

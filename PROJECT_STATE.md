@@ -58,3 +58,40 @@ Defaults below are in place and adjustable; each blocks live runs until confirme
 The app does not automatically reprice an unfilled exit or recover an ambiguous
 submission. Stop means stop monitoring, not liquidate. Only one process should
 operate each account. See README for setup and operational limits.
+
+## Schwab login status and weekly reconnect
+
+- `coopa_trada/schwab_token.py` reads schwab-py's token file
+  (`{"creation_timestamp", "token": {...}}`) and classifies it as Connected,
+  Expiring soon (< 2 days left), Expired (7 days after login), or Not set up
+  (missing, damaged, legacy format without a login time, or a login time in the future).
+- Any run that touches Schwab (LIVE, or any component marked
+  `requires_schwab_token`) refuses to start unless the login lasts until 30 minutes
+  after that day's close. Simulation with synthetic data needs no token.
+  `wiring.schwab_client` checks before schwab-py even loads the file.
+- Dashboard: status pill, countdown, warning banner under 2 days, and a
+  Reconnect Schwab button (paste-the-redirect-address flow; see below). Reconnect
+  is refused while a run is in progress. All of it is tested against a mocked schwab-py.
+
+### Would schwab-py's manual login work on a headless cloud server?
+
+Yes for the token exchange, with one practical catch. From the schwab-py 1.5.1 source
+in `.venv/lib/python3.14/site-packages/schwab/auth.py`:
+
+- `client_from_manual_flow` never opens a browser or starts a server. It builds
+  the login URL locally (`get_auth_context`), prints it, reads the redirect address
+  with `input('Redirect URL> ')`, and exchanges it with `client_from_received_url`.
+  The person can log in from any browser on any machine. The redirect to
+  `https://127.0.0.1:8182` fails to load on their machine, but the address bar
+  still holds the one-time code, and that is what gets pasted.
+- The catch: `input()` needs someone at an interactive terminal on the server
+  (for example an SSH session), every 7 days. This app's Reconnect page does the
+  same two calls through a web form instead, but the UI binds to 127.0.0.1 only,
+  so on a cloud server it would have to be reached through an SSH tunnel or put
+  behind real authentication first. Neither is built.
+- `client_from_login_flow` (the browser-assisted flow) would **not** work headless:
+  it calls `webbrowser.get(...).open(...)` on the server and waits for the redirect on
+  its own 127.0.0.1 callback server (it rejects any other callback host), so the
+  browser must run on the same machine.
+- `easy_client` falls back to `client_from_login_flow` outside notebooks, so it
+  is unsuitable for headless use too.

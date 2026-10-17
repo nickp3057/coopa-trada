@@ -27,6 +27,7 @@ from .exits import (
 )
 from .logs import get_logger
 from .rules import FixedQuantitySizer
+from .schwab_token import START_MARGIN, start_block_reason
 from .store import Store, position_key
 
 __all__ = ["Engine", "SyntheticQuoteSource", "ReconcileReport"]
@@ -88,6 +89,7 @@ class Engine:
         quote_source: Callable[[str], Quote] | None = None,
         sizer=None,
         now: Callable[[], datetime] = clock.now_utc,
+        token_status=None,
         sleep: Callable[[float], None] = _time.sleep,
     ):
         self.source = source
@@ -99,6 +101,9 @@ class Engine:
         self.mode = mode
         self.quote_source = quote_source
         self.sizer = sizer or FixedQuantitySizer(rules.max_dollars_per_position)
+        # Callable(now) -> schwab_token.TokenStatus; required whenever a
+        # component talks to Schwab (see _needs_schwab_token).
+        self.token_status = token_status
         self._now = now
         self._sleep = sleep
         self.log = get_logger("coopa_trada.engine", mode)
@@ -178,6 +183,22 @@ class Engine:
         return inst.get("symbol") or pos.get("symbol") or ""
 
     # -- main loop -------------------------------------------
+    def _needs_schwab_token(self) -> bool:
+        if self.mode is Mode.LIVE:
+            return True
+        parts = (self.broker, self.resolver, self.quote_source)
+        return any(getattr(part, "requires_schwab_token", False) for part in parts)
+
+    def _check_schwab_token(self, day: date) -> None:
+        if not self._needs_schwab_token():
+            return  # simulation with synthetic data needs no login
+        if self.token_status is None:
+            raise ValueError("Cannot start: this run uses Schwab but no Schwab login check is configured")
+        reason = start_block_reason(self.token_status(self._now()),
+                                    self.cal.session_close(day) + START_MARGIN)
+        if reason is not None:
+            raise ValueError(reason)
+
     def run(self, day: date, *, once: bool = False) -> None:
         if self.mode is Mode.LIVE:
             # Enforced here, not only in the UI, so neither the CLI nor the web
@@ -189,6 +210,7 @@ class Engine:
                 raise ValueError("Live --once is disabled: orders require continuous monitoring")
             if day != clock.to_market(self._now()).date():
                 raise ValueError("Live trading date must be today")
+        self._check_schwab_token(day)
         report = self.reconcile()
         if report.divergences:
             raise RuntimeError("Reconciliation found divergences; resolve them before starting trading")

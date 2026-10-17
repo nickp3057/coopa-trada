@@ -13,6 +13,7 @@ from coopa_trada.engine import Engine
 from coopa_trada.exits import Quote
 from coopa_trada.models import AssetClass, Right, Signal
 from coopa_trada.rules import SETTING_LABELS, FixedQuantitySizer, load_rules
+from coopa_trada.schwab_token import TokenState, TokenStatus
 from coopa_trada.store import Store
 from coopa_trada.calendar_svc import CalendarService
 
@@ -73,13 +74,20 @@ def confirmations(*unconfirmed):
     return {key: {"confirmed_by_cooper": key not in unconfirmed} for key in SETTING_LABELS}
 
 
+def logged_in(now):
+    """A fake Schwab login made at NOW, valid for 7 days."""
+    return TokenStatus(TokenState.CONNECTED, "fake", "Logged in to Schwab.",
+                       NOW, NOW + timedelta(days=7), now)
+
+
 def engine(store, broker, now=lambda: NOW, sleep=lambda _: None):
     rules = replace(load_rules("config/rules.example.yaml"), setting_confirmations=confirmations(),
                     cooper_drop_from_entry_pct=None)
     return Engine(source=SimpleNamespace(fetch=lambda day: [signal()]),
                   resolver=SyntheticResolver(base_price=1), broker=broker, store=store,
                   rules=rules, cal=CalendarService(), mode=broker.mode,
-                  quote_source=lambda _: Quote(1, 1.02, 1.01), now=now, sleep=sleep)
+                  quote_source=lambda _: Quote(1, 1.02, 1.01), now=now, sleep=sleep,
+                  token_status=logged_in)
 
 
 def test_actual_fills_are_recorded_once_with_actual_time_and_price(store):

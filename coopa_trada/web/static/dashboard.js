@@ -12,7 +12,15 @@ const liveEnv = document.getElementById("live-env");
 const liveSettings = document.getElementById("live-settings");
 const liveError = document.getElementById("live-error");
 const tokenStatus = document.getElementById("token-status");
-const tokenReconnect = document.getElementById("token-reconnect");
+const schwabBanner = document.getElementById("schwab-banner");
+const schwabState = document.getElementById("schwab-state");
+const schwabCountdown = document.getElementById("schwab-countdown");
+const btnReconnect = document.getElementById("btn-reconnect");
+const reconnectSteps = document.getElementById("reconnect-steps");
+const reconnectLink = document.getElementById("reconnect-link");
+const reconnectUrl = document.getElementById("reconnect-url");
+const reconnectMsg = document.getElementById("reconnect-msg");
+let tokenExpiresAt = null;
 
 let confirmPhrase = "ENABLE LIVE TRADING";
 let lastStatus = null;
@@ -86,38 +94,68 @@ async function loadBanner() {
   if (ok) bannerEl.textContent = body.banner.trim();
 }
 
+const STATE_CLASS = { connected: "ok", expiring_soon: "warn", expired: "is-error", not_set_up: "is-error" };
+
+function fmtRemaining(ms) {
+  if (ms <= 0) return "expired";
+  const mins = Math.floor(ms / 60000);
+  const d = Math.floor(mins / 1440), h = Math.floor((mins % 1440) / 60), m = mins % 60;
+  if (d > 0) return `${d} day${d === 1 ? "" : "s"} ${h} hr`;
+  if (h > 0) return `${h} hr ${m} min`;
+  return `${m} min`;
+}
+
+function renderCountdown() {
+  if (!tokenExpiresAt) { schwabCountdown.textContent = ""; return; }
+  schwabCountdown.textContent = "Login expires in " + fmtRemaining(tokenExpiresAt - Date.now()) +
+    " (" + tokenExpiresAt.toLocaleString() + ")";
+}
+
 async function loadToken() {
   const { ok, body } = await CT.get("/api/token");
   if (!ok) return;
-  let cls = "ok";
-  let msg;
-  if (!body.present) {
-    cls = "is-error";
-    msg = "No Schwab token on disk (" + body.path + ").";
-  } else if (body.error) {
-    cls = "warn";
-    msg = "Token present at " + body.path + " — " + body.error;
-  } else if (body.refresh_expires_in_days === null) {
-    cls = "warn";
-    msg = "Token present; freshness unknown.";
-  } else if (body.refresh_expires_in_days <= 0) {
-    cls = "is-error";
-    msg = "Token refresh expired ~" + (-body.refresh_expires_in_days).toFixed(1) + " day(s) ago. Reconnect.";
-  } else if (body.stale) {
-    cls = "warn";
-    msg = "Token refresh expires in ~" + body.refresh_expires_in_days.toFixed(1) + " day(s). Reconnect soon.";
-  } else {
-    msg = "Token OK — refresh expires in ~" + body.refresh_expires_in_days.toFixed(1) + " day(s) (created ~" + body.creation_age_days.toFixed(1) + " day(s) ago).";
-  }
-  tokenStatus.textContent = msg;
-  tokenStatus.className = "status-line " + cls;
-  if (body.reconnect_hint && (!body.present || body.stale || body.error)) {
-    tokenReconnect.textContent = body.reconnect_hint;
-    tokenReconnect.hidden = false;
-  } else {
-    tokenReconnect.hidden = true;
+  const cls = STATE_CLASS[body.state] || "is-error";
+  schwabState.textContent = "Schwab: " + body.label;
+  schwabState.className = "state-pill " + cls;
+  tokenStatus.textContent = body.message + (body.app_configured ? "" :
+    " The Schwab app key and secret are not in the .env file yet, so Reconnect will not work until they are.");
+  tokenExpiresAt = body.expires_at ? new Date(body.expires_at) : null;
+  renderCountdown();
+  schwabBanner.hidden = !body.warning;
+  if (body.warning) {
+    schwabBanner.className = "alert " + (body.state === "expiring_soon" ? "alert-warn" : "alert-error");
+    schwabBanner.textContent = "Schwab: " + body.label + ". " + body.message;
   }
 }
+
+btnReconnect.addEventListener("click", async () => {
+  reconnectMsg.textContent = "";
+  const { ok, body } = await CT.post("/api/schwab/reconnect/begin", {});
+  if (!ok) {
+    reconnectMsg.textContent = body.error || "Could not start the Schwab login.";
+    reconnectMsg.className = "msg is-error";
+    return;
+  }
+  reconnectLink.href = body.authorization_url;
+  document.getElementById("reconnect-callback").textContent = body.callback_url;
+  reconnectUrl.value = "";
+  reconnectSteps.hidden = false;
+});
+
+document.getElementById("btn-reconnect-finish").addEventListener("click", async () => {
+  reconnectMsg.textContent = "Checking with Schwab…";
+  reconnectMsg.className = "msg";
+  const { ok, body } = await CT.post("/api/schwab/reconnect/finish", { redirect_url: reconnectUrl.value });
+  if (ok) {
+    reconnectSteps.hidden = true;
+    reconnectMsg.textContent = "Reconnected. Schwab: " + body.label + ".";
+    reconnectMsg.className = "msg ok";
+  } else {
+    reconnectMsg.textContent = body.error || "Reconnect failed.";
+    reconnectMsg.className = "msg is-error";
+  }
+  loadToken();
+});
 
 btnStart.addEventListener("click", async () => {
   btnStart.disabled = true;
@@ -157,3 +195,4 @@ loadToken();
 pollStatus();
 setInterval(pollStatus, 3000);
 setInterval(loadToken, 60000);
+setInterval(renderCountdown, 30000);

@@ -157,6 +157,9 @@ class SchwabBroker(_BrokerBase):
 
     mode = Mode.LIVE
 
+    # Talks to Schwab: Engine.run refuses to start without a usable login.
+    requires_schwab_token = True
+
     def __init__(self, client, account_hash: str, store: Store, ratelimiter):
         super().__init__(store)
         self.client = client
@@ -438,6 +441,9 @@ class DryRunBroker(_BrokerBase):
 
 class SchwabQuoteSource:
     """Live option quotes for the exit loop, via schwab-py. Rate-limited."""
+
+    # Talks to Schwab: Engine.run refuses to start without a usable login.
+    requires_schwab_token = True
 
     def __init__(self, client, ratelimiter=None):
         self.client = client

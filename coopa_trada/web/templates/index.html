@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %} &middot; Dashboard{% endblock %}
 {% block content %}
+<div id="schwab-banner" class="alert" role="alert" hidden></div>
 <section class="card">
   <h1>Upload your picks</h1>
   <p class="hint">Upload Cooper’s CSV or a screenshot of the five-column table. Check every contract and the full dates before selecting the list.</p>
@@ -50,10 +51,31 @@
   </details>
 </section>
 
-<section class="card">
+<section class="card" id="schwab-card">
   <h2>Schwab connection</h2>
-  <div id="token-status" class="status-line">checking&hellip;</div>
-  <div id="token-reconnect" class="hint" hidden></div>
+  <div class="row">
+    <span id="schwab-state" class="state-pill">Schwab: checking&hellip;</span>
+    <span id="schwab-countdown" class="hint"></span>
+  </div>
+  <p id="token-status" class="status-line"></p>
+  <p class="hint">Schwab makes you log in again every 7 days. The bot can only use
+    Schwab while this says Connected or Expiring soon.</p>
+  <button id="btn-reconnect" class="btn">Reconnect Schwab</button>
+  <div id="reconnect-steps" hidden>
+    <ol class="steps">
+      <li><a id="reconnect-link" href="#" target="_blank" rel="noopener">Open the Schwab login page</a>
+        (opens a new tab). Log in and click <strong>Allow</strong>.</li>
+      <li>Schwab then sends that tab to an address starting with
+        <code id="reconnect-callback"></code>. The page will say it can&rsquo;t be reached
+        or show a security warning. That is expected.</li>
+      <li>Copy the <em>whole</em> address from that tab&rsquo;s address bar, paste it here,
+        and click Finish. Do this straight away: the code in it only lasts a short time.</li>
+    </ol>
+    <input id="reconnect-url" type="text" autocomplete="off" spellcheck="false"
+      placeholder="https://127.0.0.1:8182/?code=..." aria-label="Address after clicking Allow">
+    <div class="row"><button id="btn-reconnect-finish" class="btn btn-primary">Finish</button></div>
+  </div>
+  <p id="reconnect-msg" class="msg" role="status"></p>
 </section>
 {% endblock %}
 {% block script %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script><script src="{{ url_for('static', filename='imports.js') }}"></script>{% endblock %}

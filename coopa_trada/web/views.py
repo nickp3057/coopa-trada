@@ -11,7 +11,7 @@ from pathlib import Path
 
 from flask import Blueprint, current_app, jsonify, render_template, request
 
-from ..config import Mode, resolve_mode, _truthy
+from ..config import Mode, credentials_from_env, resolve_mode, _truthy
 from ..logs import banner
 from ..models import CsvSignalSource
 from ..store import Store
@@ -136,13 +136,16 @@ def api_run_start():
                 ),
                 409,
             )
-        # Early, readable rejection. Engine.run enforces the same gate.
+        # Early, readable rejection. Engine.run enforces the same gates.
         status = live_status(_paths().config_path)
         if status["live_blocked"]:
             pending = "; ".join(f'{s["label"]} ({s["current"]})' for s in status["unconfirmed_settings"])
             return jsonify(error=status["live_block_error"] or
                            f"Live run blocked: unconfirmed settings: {pending}. Confirm them in Settings.",
                            unconfirmed_settings=status["unconfirmed_settings"]), 409
+        token = token_status()
+        if token["state"] in ("not_set_up", "expired"):
+            return jsonify(error=f'Schwab is {token["label"].lower()}. {token["message"]}'), 409
 
     try:
         _runner().start(live=live, date_str=date_str)
@@ -216,11 +219,43 @@ def api_reconcile():
 @bp.get("/api/token")
 def api_token():
     status = token_status()
-    status["reconnect_hint"] = (
-        "Run the one-time interactive Schwab login from the README "
-        '("One-time token login"), then point SCHWAB_TOKEN_PATH at the new file.'
-    )
+    status["reconnect_hint"] = "Click Reconnect Schwab and follow the steps."
+    status["login_in_progress"] = current_app.config.get("SCHWAB_PENDING_LOGIN") is not None
     return jsonify(status)
+
+
+# Weekly reconnect: begin returns Schwab's login URL; finish takes the address
+# the browser lands on after "Allow". See coopa_trada/schwab_login.py.
+@bp.post("/api/schwab/reconnect/begin")
+def api_reconnect_begin():
+    from ..schwab_login import LoginError, begin_login
+    if _runner().status == "running":
+        return jsonify(error="Stop the current run before reconnecting Schwab."), 409
+    try:
+        pending = begin_login(credentials_from_env())
+    except LoginError as exc:
+        return jsonify(error=str(exc)), 400
+    current_app.config["SCHWAB_PENDING_LOGIN"] = pending
+    return jsonify(authorization_url=pending.authorization_url,
+                   callback_url=credentials_from_env().callback_url)
+
+
+@bp.post("/api/schwab/reconnect/finish")
+def api_reconnect_finish():
+    from ..schwab_login import LoginError, LoginRejected, finish_login
+    if _runner().status == "running":
+        return jsonify(error="Stop the current run before reconnecting Schwab."), 409
+    body = request.get_json(silent=True) or {}
+    try:
+        finish_login(credentials_from_env(), current_app.config.get("SCHWAB_PENDING_LOGIN"),
+                     body.get("redirect_url", ""))
+    except LoginRejected as exc:
+        current_app.config["SCHWAB_PENDING_LOGIN"] = None  # Schwab's codes are single-use
+        return jsonify(error=str(exc)), 400
+    except LoginError as exc:
+        return jsonify(error=str(exc)), 400
+    current_app.config["SCHWAB_PENDING_LOGIN"] = None
+    return jsonify(token_status())
 
 
 # -- mode banner --------------------------------------------------

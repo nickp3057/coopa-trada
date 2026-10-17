@@ -64,6 +64,9 @@ class ContractResolver:
     and ``broker.SchwabBroker`` touch them.
     """
 
+    # Talks to Schwab: Engine.run refuses to start without a usable login.
+    requires_schwab_token = True
+
     def __init__(self, client, ratelimiter=None):
         self.client = client
         self.ratelimiter = ratelimiter
