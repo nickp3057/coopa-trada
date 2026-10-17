@@ -12,6 +12,9 @@ const liveEnv = document.getElementById("live-env");
 const liveSettings = document.getElementById("live-settings");
 const liveError = document.getElementById("live-error");
 const tokenStatus = document.getElementById("token-status");
+const lockPanel = document.getElementById("lock-panel");
+const lockText = document.getElementById("lock-text");
+let staleLocks = [];
 const schwabBanner = document.getElementById("schwab-banner");
 const schwabState = document.getElementById("schwab-state");
 const schwabCountdown = document.getElementById("schwab-countdown");
@@ -157,6 +160,26 @@ document.getElementById("btn-reconnect-finish").addEventListener("click", async 
   loadToken();
 });
 
+async function loadLocks() {
+  const { ok, body } = await CT.get("/api/lock");
+  if (!ok) return;
+  staleLocks = body.stale;
+  lockPanel.hidden = staleLocks.length === 0;
+  lockText.textContent = staleLocks.map((l) =>
+    `A previous run did not shut down cleanly (${l.purpose} lock: ${l.description}). New runs are blocked until it is cleared.`
+  ).join(" ");
+}
+
+document.getElementById("btn-clear-lock").addEventListener("click", async () => {
+  const messages = [];
+  for (const lock of staleLocks) {
+    const { body } = await CT.post("/api/lock/clear", { path: lock.path });
+    messages.push(body.message || body.error);
+  }
+  statusLine.textContent = messages.join(" ");
+  loadLocks();
+});
+
 btnStart.addEventListener("click", async () => {
   btnStart.disabled = true;
   const { ok, body } = await CT.post("/api/run/start", { date: runDate.value || null });
@@ -192,7 +215,9 @@ if (btnStartLive) {
 
 loadBanner();
 loadToken();
+loadLocks();
 pollStatus();
+setInterval(loadLocks, 15000);
 setInterval(pollStatus, 3000);
 setInterval(loadToken, 60000);
 setInterval(renderCountdown, 30000);

@@ -29,6 +29,12 @@
       Date <input id="run-date" type="date" title="defaults to today (market tz)">
     </label>
   </div>
+  <div id="lock-panel" class="alert alert-error" hidden>
+    <p id="lock-text"></p>
+    <p class="hint">Before clearing: open the Reconcile page (or Schwab) and check for open
+      orders or positions the stopped run may have left.</p>
+    <button id="btn-clear-lock" class="btn">Clear stale lock</button>
+  </div>
   <p class="hint">The daily Start button always runs in DRY&#8209;RUN. Enabling live
     trading is a separate, deliberately harder step below.</p>
 </section>

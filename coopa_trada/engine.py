@@ -8,6 +8,7 @@ engine itself holds no market-time literals.
 from __future__ import annotations
 
 import time as _time
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from typing import Callable
@@ -27,6 +28,7 @@ from .exits import (
 )
 from .logs import get_logger
 from .rules import FixedQuantitySizer
+from .runlock import ProcessLock, account_lock_path, database_lock_path, describe
 from .schwab_token import START_MARGIN, start_block_reason
 from .store import Store, position_key
 
@@ -199,7 +201,29 @@ class Engine:
         if reason is not None:
             raise ValueError(reason)
 
+    def _run_locks(self) -> list[ProcessLock]:
+        """One copy per database and per Schwab account (see runlock)."""
+        locks = []
+        row = self.store.conn.execute("PRAGMA database_list").fetchone()
+        if row is not None and row["file"]:
+            locks.append(ProcessLock(database_lock_path(row["file"]), purpose="database",
+                                     mode=self.mode.value))
+        account = getattr(self.broker, "account_hash", None)
+        if account:
+            locks.append(ProcessLock(account_lock_path(account), purpose="Schwab account",
+                                     mode=self.mode.value))
+        return locks
+
     def run(self, day: date, *, once: bool = False) -> None:
+        with ExitStack() as held:
+            for lock in self._run_locks():
+                held.enter_context(lock)
+                if lock.cleared_stale:
+                    self.log.warning("previous simulation did not shut down cleanly (%s); continuing",
+                                     describe(lock.cleared_stale))
+            self._run_locked(day, once=once)
+
+    def _run_locked(self, day: date, *, once: bool) -> None:
         if self.mode is Mode.LIVE:
             # Enforced here, not only in the UI, so neither the CLI nor the web
             # runner can start live trading on unconfirmed settings.

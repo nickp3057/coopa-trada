@@ -3,6 +3,7 @@
     coopa_trada run       [--live] [--once] [--date YYYY-MM-DD] [--signals P] [--config P] [--db P]
     coopa_trada reconcile [--db P] [--config P]
     coopa_trada resolve   --signals P [--date YYYY-MM-DD]
+    coopa_trada unlock    [--db P] [--force-other-host]
 
 Every subcommand loads ``.env``, resolves the run mode, and prints the banner.
 """
@@ -53,6 +54,11 @@ def build_parser() -> argparse.ArgumentParser:
     res = sub.add_parser("resolve", help="resolve each signal to an OSI contract (read-only, no orders)")
     res.add_argument("--signals", default=DEFAULT_SIGNALS)
     res.add_argument("--date", help="restrict to signals received on this market date")
+
+    unl = sub.add_parser("unlock", help="clear a stale lock left by a run that did not shut down cleanly")
+    unl.add_argument("--db", default=DEFAULT_DB)
+    unl.add_argument("--force-other-host", action="store_true",
+                     help="also clear a lock recorded by another computer (shared folders only)")
 
     return p
 
@@ -196,6 +202,27 @@ def cmd_resolve(args) -> int:
     return rc
 
 
+def cmd_unlock(args) -> int:
+    from .runlock import RunLocked, clear_stale_lock, known_locks
+
+    rc = 0
+    for lock in known_locks(args.db):
+        if lock["state"] == "free":
+            continue
+        if lock["state"] == "held":
+            print(f"{lock['purpose']} lock is in use by {lock['description']}; left alone.")
+            rc = 1
+            continue
+        try:
+            print(clear_stale_lock(lock["path"], force_other_host=args.force_other_host)["message"])
+        except RunLocked as exc:
+            print(str(exc))
+            rc = 1
+    if rc == 0:
+        print("No stale locks remain.")
+    return rc
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     load_env()
@@ -203,10 +230,13 @@ def main(argv: list[str] | None = None) -> int:
         "run": cmd_run,
         "reconcile": cmd_reconcile,
         "resolve": cmd_resolve,
+        "unlock": cmd_unlock,
     }[args.command]
+    from .runlock import RunLocked, StaleLock
+
     try:
         return handler(args)
-    except FileNotFoundError as exc:
+    except (FileNotFoundError, RunLocked, StaleLock) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2
 

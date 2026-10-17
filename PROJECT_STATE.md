@@ -95,3 +95,17 @@ in `.venv/lib/python3.14/site-packages/schwab/auth.py`:
   browser must run on the same machine.
 - `easy_client` falls back to `client_from_login_flow` outside notebooks, so it
   is unsuitable for headless use too.
+
+## One process per account
+
+- `coopa_trada/runlock.py`: `Engine.run` takes an OS file lock on `<db>.lock` next
+  to the database, plus `~/.coopa_trada/locks/account-<sha256>.lock` whenever the
+  broker is bound to a Schwab account (`COOPA_TRADA_LOCK_DIR` overrides the folder).
+  The CLI and web runner both go through `Engine.run`, so neither can skip it.
+- Locks use `flock` (macOS/Linux) or `msvcrt.locking` (Windows, untested). The OS frees
+  them when a process dies. The file records the holder, and a clean exit erases
+  the record, so a free lock with a record is a stale lock left by a crash.
+- A stale lock from a LIVE run blocks every new run until a person clears it with
+  `python -m coopa_trada unlock` or the dashboard's Clear stale lock button, after
+  checking the Reconcile page. A stale record from a DRY-RUN is cleared automatically.
+  A lock recorded by another computer needs `--force-other-host`.

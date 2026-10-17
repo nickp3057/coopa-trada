@@ -215,6 +215,29 @@ def api_reconcile():
     )
 
 
+# -- run locks ------------------------------------------------------
+@bp.get("/api/lock")
+def api_lock():
+    from ..runlock import known_locks
+    locks = [lock for lock in known_locks(_paths().db_path) if lock["state"] != "free"]
+    return jsonify(locks=locks, stale=[lock for lock in locks if lock["state"] == "stale"])
+
+
+@bp.post("/api/lock/clear")
+def api_lock_clear():
+    from ..runlock import RunLocked, clear_stale_lock, known_locks
+    body = request.get_json(silent=True) or {}
+    # Only locks this app knows about; never an arbitrary path from the request.
+    known = {lock["path"]: lock for lock in known_locks(_paths().db_path)}
+    if body.get("path") not in known:
+        return jsonify(error="Unknown lock"), 400
+    try:
+        result = clear_stale_lock(body["path"])
+    except RunLocked as exc:
+        return jsonify(error=str(exc)), 409
+    return jsonify(result)
+
+
 # -- connection status ---------------------------------------------
 @bp.get("/api/token")
 def api_token():
