@@ -52,6 +52,9 @@ the same folder as the app. Nick will give you the values.
 
 ### 2b. Log in to Schwab
 
+(Nick: the Schwab Developer Portal checklist, the exact `.env` values, and a
+longer version of these steps are in `docs/SCHWAB_SETUP.md`.)
+
 1. On the Dashboard, scroll to **Schwab connection** and click **Reconnect Schwab**.
 2. Click **Open the Schwab login page**. A new tab opens on Schwab's site.
 3. Log in as usual (including any text-message code) and click **Allow**.

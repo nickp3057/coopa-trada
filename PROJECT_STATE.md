@@ -214,3 +214,11 @@ in `.venv/lib/python3.14/site-packages/schwab/auth.py`:
 - The Dashboard shows "Keeping Mac awake: <reason>" (or the error). Closing the lid
   still sleeps the Mac without an external display; COOPER_README explains why the Mac
   must stay plugged in with the lid open.
+
+## Schwab setup checklist
+
+`docs/SCHWAB_SETUP.md`: what the Developer Portal and `.env` must contain for the
+Reconnect flow (callback URL character-for-character identical, app Ready For Use,
+key/secret), which login decides the account (`SCHWAB_ACCOUNT_ID` recommended), a
+plain-language first-login walkthrough, a failure table, and a list of nine points
+the installed schwab-py/Authlib source can't confirm.
