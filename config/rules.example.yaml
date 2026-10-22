@@ -70,6 +70,17 @@ rank_delta_source: schwab_live
 # that contract costs more than this, the ticker is skipped entirely.
 max_dollars_per_position: 300
 
+# Exit repricing (Cooper: if a sell doesn't fill in 1 minute, reprice it to the
+# current price). A real sell order still unfilled after
+# exit_reprice_after_seconds is canceled and, once Schwab confirms the cancel,
+# replaced with a limit order at the current bid for whatever is still held.
+# Never a market order. After exit_reprice_max_attempts replacements, a person
+# is alerted (Mac + phone) and the last order is left working. 0 = off.
+# Only lowers the price: if the bid is not below the working order's price, it
+# waits. NEW SETTINGS, NOT CONFIRMED BY COOPER.
+exit_reprice_after_seconds: 60
+exit_reprice_max_attempts: 5
+
 # Exit loop cadence.
 poll_interval_seconds: 30
 
@@ -107,4 +118,6 @@ setting_confirmations:
   total_budget:
     confirmed_by_cooper: false
   delta_ranking:
+    confirmed_by_cooper: false
+  exit_repricing:
     confirmed_by_cooper: false

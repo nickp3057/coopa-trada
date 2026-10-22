@@ -14,6 +14,7 @@ const PCT_OR_INT_FIELDS = [
   "entry_minutes_before_close", "poll_interval_seconds",
   "trailing_stop_pct", "hard_stop_loss_pct", "take_profit_pct",
   "total_budget", "max_dollars_per_position",
+  "exit_reprice_after_seconds", "exit_reprice_max_attempts",
   "cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct",
   "profit_trail_points",
 ];

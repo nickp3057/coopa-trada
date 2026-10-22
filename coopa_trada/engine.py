@@ -21,6 +21,7 @@ from .broker import OrderNotPlaced, OrderOutcomeUnknown
 from .contracts import ContractNotTradable, ContractUnderspecified
 from .exits import (
     CompositeExit,
+    ExitDecision,
     HardTimeExit,
     PositionState,
     ProfitPointTrail,
@@ -42,6 +43,14 @@ __all__ = ["Engine", "SyntheticQuoteSource", "ReconcileReport"]
 EXIT_UNFILLED_ALERT = timedelta(minutes=3)
 # Exit orders that ended without selling; the position is still open.
 _FAILED_EXIT_STATUSES = {"REJECTED", "CANCELED", "CANCELLED", "EXPIRED", "NOT_PLACED", "ERROR"}
+_CANCELED = {"CANCELED", "CANCELLED"}
+# Statuses after which an order can no longer fill (see store._CLOSED_ORDER_STATUSES).
+_DONE_STATUSES = {"FILLED", "CANCELED", "CANCELLED", "REJECTED", "REPLACED", "EXPIRED", "NOT_PLACED"}
+
+
+def _canceled_to_reprice(order) -> bool:
+    """A sell order this bot canceled itself, to replace it at a lower price."""
+    return order["status"] in _CANCELED and order["cancel_requested_at_utc"] is not None
 
 
 class SyntheticQuoteSource:
@@ -128,6 +137,8 @@ class Engine:
         # component talks to Schwab (see _needs_schwab_token).
         self.token_status = token_status
         self._now = now
+        if hasattr(broker, "now"):
+            broker.now = now  # order times on the same clock as the exit rules
         self._sleep = sleep
         self.log = get_logger("coopa_trada.engine", mode)
         # Anything a person must act on is also pushed to them (see alerts).
@@ -479,13 +490,18 @@ class Engine:
         acted = 0
         halted = self.store.halted_symbols(self.mode.value)
         for state, signal_id, plan in self._managed_positions(day):
-            self._check_exit_order(state, signal_id)
+            exits = self.store.exit_orders(self.mode.value, state.entry_order_id)
+            self._check_exit_order(state, signal_id, exits)
             if state.osi_symbol in halted:
                 self.log.warning("hold %s: halted until a person resolves an unknown order", state.osi_symbol)
                 continue
             quote = self._quote(state.osi_symbol)
             update_peak(state, quote)
             self.store.update_peak(state.entry_order_id, state.session_peak_mid)
+            if exits:
+                # The sell decision was made; only its price can still change.
+                acted += self._reprice(state, signal_id, exits, quote, day)
+                continue
             now = clock.to_market(self._now())
             if now < plan.start:
                 continue
@@ -535,14 +551,16 @@ class Engine:
                 + ("The position is still open: sell it in Schwab if you want out. " if side == "sell" else "")
                 + "Acknowledge it on the Reconcile page.", key=key)
 
-    def _check_exit_order(self, state: PositionState, signal_id: str) -> None:
+    def _check_exit_order(self, state: PositionState, signal_id: str, exits=None) -> None:
         """Alert when this position's exit order failed, or is not filling."""
-        row = self.store.conn.execute(
-            "SELECT * FROM orders WHERE intent='EXIT' AND mode=? AND entry_order_id=? ORDER BY id DESC LIMIT 1",
-            (self.mode.value, state.entry_order_id)).fetchone()
-        if row is None:
+        if exits is None:
+            exits = self.store.exit_orders(self.mode.value, state.entry_order_id)
+        if not exits:
             return
+        row = exits[-1]
         what = contract_text(state.osi_symbol)
+        if _canceled_to_reprice(row):
+            return  # canceled by the bot itself; its replacement follows
         if row["status"] in _FAILED_EXIT_STATUSES:
             self.alerter.alert(
                 "exit_failed", "Sell order failed",
@@ -550,14 +568,115 @@ class Engine:
                 f"The bot will not send another. Check Schwab and sell it there if you want out.",
                 key=f"exit:{signal_id}")
         elif row["status"] not in ("UNKNOWN", "FILLED"):
-            age = self._now() - clock.parse_iso(row["created_at_utc"])
+            # Measured from the first sell order: repricing does not restart the clock.
+            age = self._now() - clock.parse_iso(exits[0]["created_at_utc"])
             if age >= EXIT_UNFILLED_ALERT:
                 minutes = int(age.total_seconds() // 60)
+                lowered = row["reprice_attempt"]
                 self.alerter.alert(
                     "exit_unfilled", "Sell order not filling",
                     f"The sell order for {what} has been waiting {minutes} minutes without filling. "
-                    f"Check it in Schwab; the bot does not lower the price by itself.",
+                    f"The bot has made {lowered} price change{'s' if lowered != 1 else ''} "
+                    f"(at most {self.rules.exit_reprice_max_attempts}, real orders only). Check it in Schwab.",
                     key=f"exit-unfilled:{signal_id}")
+
+    # -- exit repricing ---------------------------------------
+    def _reprice(self, state: PositionState, signal_id: str, exits, quote: Quote, day: date) -> int:
+        """Cooper: a sell that has not filled within ``exit_reprice_after_seconds``
+        is canceled and replaced at the current bid, at most
+        ``exit_reprice_max_attempts`` times. Returns 1 when a replacement was sent.
+
+        Race safety: a replacement is sent only after Schwab reports the old
+        order CANCELED (no further fills are then possible), and only for the
+        quantity Schwab's executions show is still held. A fill that lands while
+        the cancel is in flight therefore shows up as FILLED (nothing to replace)
+        or as a partial fill (only the rest is sold). Simulated sells fill at
+        once, so this applies to real orders only. Never a market order.
+        """
+        latest = exits[-1]
+        if self.mode is not Mode.LIVE or self.rules.exit_reprice_max_attempts <= 0:
+            return 0
+        if _canceled_to_reprice(latest):
+            return self._place_replacement(state, signal_id, latest, day)  # e.g. after a restart
+        if latest["status"] in _DONE_STATUSES or latest["status"] == "UNKNOWN":
+            return 0
+        now = self._now()
+        after = timedelta(seconds=self.rules.exit_reprice_after_seconds)
+        if latest["cancel_requested_at_utc"] is not None:
+            if now - clock.parse_iso(latest["cancel_requested_at_utc"]) >= after:
+                # Schwab never confirmed the cancel; ask again on a later tick.
+                self.store.set_cancel_requested(latest["id"], None)
+            return 0
+        if now - clock.parse_iso(latest["created_at_utc"]) < after:
+            return 0
+        what = contract_text(state.osi_symbol)
+        if latest["reprice_attempt"] >= self.rules.exit_reprice_max_attempts:
+            self.alerter.alert(
+                "exit_reprice_exhausted", "Sell order still not filling",
+                f"The sell order for {what} is still not filled after {latest['reprice_attempt']} "
+                f"price changes, the most the bot makes. It stays at its last price. "
+                f"Check Schwab and sell it there if you want out.",
+                key=f"exit-exhausted:{signal_id}")
+            return 0
+        if not quote.bid < latest["limit_price"] - 1e-9:
+            return 0  # only ever lower the price; a bid at or above the order should fill it
+        try:
+            self.broker.cancel_exit_for_reprice(latest)
+        except Exception as exc:  # noqa: BLE001 - the order stays as it is; retried later
+            self.log.error("EXIT %s: could not cancel the sell order to reprice it: %r", signal_id, exc)
+            return 0
+        refreshed = self.store.get_order(latest["id"])
+        if _canceled_to_reprice(refreshed):
+            return self._place_replacement(state, signal_id, refreshed, day)
+        self.log.info("EXIT %s: cancel requested for repricing; Schwab now shows %s",
+                      signal_id, refreshed["status"])
+        return 0
+
+    def _place_replacement(self, state: PositionState, signal_id: str, canceled, day: date) -> int:
+        row = next((r for r in self.store.open_positions(self.mode.value)
+                    if r["order_id"] == state.entry_order_id), None)
+        if row is None:
+            return 0  # everything sold before the cancel landed
+        remaining = int(row["quantity"])
+        quote = self._quote(state.osi_symbol)  # the current price, just before sending
+        attempt = int(canceled["reprice_attempt"]) + 1
+        decision = ExitDecision(
+            strategy="Reprice",
+            reason=(f"sell order unfilled after {self.rules.exit_reprice_after_seconds}s at "
+                    f"{canceled['limit_price']:.2f}; replaced at bid {quote.bid:.2f} "
+                    f"(attempt {attempt} of {self.rules.exit_reprice_max_attempts})"),
+            price=quote.bid, at=self._now(),
+            meta={"replaces_order_id": canceled["id"], "attempt": attempt, "remaining": remaining})
+        try:
+            result = self.broker.place_exit(
+                replace(state, quantity=remaining), quote.bid, decision, signal_id=signal_id, day=day,
+                replaces_order_id=canceled["id"], reprice_attempt=attempt)
+        except (OrderNotPlaced, OrderOutcomeUnknown) as exc:
+            self.log.error("EXIT %s: %s", signal_id, exc)
+            self._alert_order_problem("sell", state.osi_symbol, exc, key=f"exit:{signal_id}")
+            return 0
+        if result.deduplicated:
+            return 0
+        self.store.record_exit_event(
+            position_key=position_key(signal_id, state.osi_symbol), order_id=result.order_row_id,
+            strategy=decision.strategy, reason=decision.reason, trigger_price=quote.bid,
+            peak_mid=state.session_peak_mid,
+            detail={"decision_meta": decision.meta, "quote": quote.__dict__, "mode": self.mode.value})
+        self.log.info("EXIT %s %s x%d repriced to bid %.2f (attempt %d) -> status=%s",
+                      signal_id, state.osi_symbol, remaining, quote.bid, attempt, result.status)
+        return 1
+
+    def _next_sleep(self) -> float:
+        """The poll interval, shortened so a due reprice is not up to a poll late."""
+        wait = float(self.rules.poll_interval_seconds)
+        if self.mode is not Mode.LIVE or self.rules.exit_reprice_max_attempts <= 0:
+            return wait
+        after = timedelta(seconds=self.rules.exit_reprice_after_seconds)
+        for order in self.store.orders_open(self.mode.value):
+            if order["intent"] == "EXIT" and order["status"] != "UNKNOWN":
+                due = (clock.parse_iso(order["created_at_utc"]) + after - self._now()).total_seconds()
+                wait = min(wait, max(due, 1.0))
+        return wait
 
     def _sync_orders(self) -> None:
         if self.mode is Mode.LIVE:
@@ -586,7 +705,7 @@ class Engine:
                         self.broker.cancel_entry(order)
             if self._now() >= self.cal.session_close(day):
                 raise RuntimeError("Market closed with unsettled orders or positions; check Schwab before restarting")
-            self._sleep(self.rules.poll_interval_seconds)
+            self._sleep(self._next_sleep())
 
     def _only_overnight_holds(self, day: date) -> bool:
         """Every open position was bought today, may be held overnight, and

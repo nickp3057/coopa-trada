@@ -45,6 +45,7 @@ class _AcceptedWithoutId(RuntimeError):
 
 _OPEN_STATUS = "WORKING"
 _FILLED_STATUS = "FILLED"
+_CANCELED_STATUSES = {"CANCELED", "CANCELLED"}
 
 
 @dataclass
@@ -79,6 +80,8 @@ class _BrokerBase:
 
     def __init__(self, store: Store):
         self.store = store
+        # Stamps order and cancel-request times; the engine shares its clock here.
+        self.now: Callable[[], datetime] = clock.now_utc
 
     def _submit(
         self,
@@ -95,10 +98,14 @@ class _BrokerBase:
         fill_price: float | None,
         entry_order_id: int | None = None,
         recover: Callable[[int, Exception, datetime], OrderResult | None] | None = None,
+        replaces_order_id: int | None = None,
+        reprice_attempt: int = 0,
     ) -> OrderResult:
         with self.store.transaction():
             legacy_key = make_key(signal_id, intent, day)
             key = self.mode.value + ":" + legacy_key
+            if reprice_attempt:
+                key += f":reprice{int(reprice_attempt)}"
             existing = self.store.find_order_by_idempotency_key(key)
             if existing is None:
                 legacy = self.store.find_order_by_idempotency_key(legacy_key)
@@ -109,7 +116,13 @@ class _BrokerBase:
                     "SELECT * FROM orders WHERE intent='EXIT' AND mode=? AND entry_order_id=? ORDER BY id DESC LIMIT 1",
                     (self.mode.value, entry_order_id),
                 ).fetchone()
-                if prior_exit is not None:
+                # Never a second sell for the same position, except the replacement of a
+                # sell order this bot canceled to reprice, once Schwab confirms it CANCELED.
+                replacing = (prior_exit is not None and replaces_order_id is not None
+                             and prior_exit["id"] == replaces_order_id
+                             and prior_exit["status"] in _CANCELED_STATUSES
+                             and prior_exit["cancel_requested_at_utc"] is not None)
+                if prior_exit is not None and not replacing:
                     existing = prior_exit
             if existing is not None:
                 return OrderResult(
@@ -136,6 +149,9 @@ class _BrokerBase:
                 request=request,
                 entry_order_id=entry_order_id,
                 trading_day=day,
+                created_at=self.now(),
+                replaces_order_id=replaces_order_id,
+                reprice_attempt=reprice_attempt,
             )
 
         submitted_at = clock.now_utc()
@@ -355,7 +371,8 @@ class SchwabBroker(_BrokerBase):
             recover=self._recover,
         )
 
-    def place_exit(self, position, limit_price, decision, *, signal_id, day):
+    def place_exit(self, position, limit_price, decision, *, signal_id, day,
+                   replaces_order_id=None, reprice_attempt=0):
         from schwab.orders.options import option_sell_to_close_limit
 
         order_spec = option_sell_to_close_limit(position.osi_symbol, position.quantity, f"{limit_price:.2f}")
@@ -365,6 +382,8 @@ class SchwabBroker(_BrokerBase):
             "quantity": position.quantity,
             "limit_price": limit_price,
             "decision": {"strategy": decision.strategy, "reason": decision.reason},
+            "replaces_order_id": replaces_order_id,
+            "reprice_attempt": reprice_attempt,
             "spec": order_spec.build() if hasattr(order_spec, "build") else str(order_spec),
         }
 
@@ -390,6 +409,8 @@ class SchwabBroker(_BrokerBase):
             do_call=do_call,
             fill_price=None,
             recover=self._recover,
+            replaces_order_id=replaces_order_id,
+            reprice_attempt=reprice_attempt,
         )
 
     def cancel_entry(self, order) -> None:
@@ -400,6 +421,37 @@ class SchwabBroker(_BrokerBase):
         _check_response(resp)
         # Cancellation races with fills. Only the subsequent broker snapshot settles it.
         self.sync_orders()
+
+    def cancel_exit_for_reprice(self, order) -> None:
+        """Ask Schwab to cancel a working sell order so it can be repriced.
+
+        The order is marked first, so a crash between the request and the answer
+        still shows that a cancel may be in flight. A cancel Schwab refuses (for
+        example because the order just filled) clears the mark. Whatever happens,
+        the order's state is then read back from Schwab: only a CANCELED answer
+        from Schwab ever leads to a replacement, and the replacement sells only
+        what Schwab's executions show is still held.
+        """
+        import httpx
+
+        if order["mode"] != self.mode.value or order["intent"] != "EXIT" or not order["broker_order_id"]:
+            raise ValueError("Can only reprice this mode's tracked sell orders")
+        self.store.set_cancel_requested(order["id"], self.now())
+        try:
+            self._rl()
+            _check_response(self.client.cancel_order(order["broker_order_id"], self.account_hash))
+        except httpx.HTTPStatusError as exc:
+            if 400 <= exc.response.status_code < 500:
+                self.store.set_cancel_requested(order["id"], None)  # Schwab said no; nothing in flight
+        finally:
+            self._sync_one(order["id"])
+
+    def _sync_one(self, order_id: int) -> None:
+        order = self.store.get_order(order_id)
+        self._rl()
+        resp = self.client.get_order(order["broker_order_id"], self.account_hash)
+        _check_response(resp)
+        self.store.sync_order(order_id, resp.json())
 
     def sync_orders(self) -> None:
         for order in self.store.orders_open(self.mode.value):
@@ -517,7 +569,9 @@ class DryRunBroker(_BrokerBase):
         self._stamp_dry_id(result)
         return result
 
-    def place_exit(self, position, limit_price, decision, *, signal_id, day):
+    def place_exit(self, position, limit_price, decision, *, signal_id, day,
+                   replaces_order_id=None, reprice_attempt=0):
+        # Simulated sells fill at once, so they are never repriced.
         fill_price = limit_price  # sells fill at the bid
         request = {
             "kind": "DRY option_sell_to_close_limit",

@@ -112,6 +112,22 @@
     </fieldset>
 
     <fieldset class="warn-fieldset">
+      <legend>Exit repricing</legend>
+      <div class="confirm-row" data-confirm-key="exit_repricing">
+        <span class="badge badge-warn" data-badge>Unconfirmed</span>
+        <label class="inline"><input type="checkbox" name="confirm_exit_repricing"> Confirmed with Cooper</label>
+      </div>
+      <p class="hint">A real sell order that has not filled is canceled and replaced at the current
+        bid (only ever lower, never a market order). After the last attempt you get an alert.</p>
+      <label class="block">Reprice an unfilled sell after (seconds)
+        <input name="exit_reprice_after_seconds" type="number" min="10" max="3600" step="1" required>
+      </label>
+      <label class="block">Most price changes per sell (0 = off)
+        <input name="exit_reprice_max_attempts" type="number" min="0" max="20" step="1" required>
+      </label>
+    </fieldset>
+
+    <fieldset class="warn-fieldset">
       <legend>Spending cap</legend>
       <div class="confirm-row" data-confirm-key="spending_cap">
         <span class="badge badge-warn" data-badge>Unconfirmed</span>

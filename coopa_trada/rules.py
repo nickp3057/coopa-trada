@@ -33,6 +33,7 @@ SETTING_LABELS = {
     "next_day_exits": "next-day exit start",
     "total_budget": "total budget",
     "delta_ranking": "which delta ranks picks",
+    "exit_repricing": "exit repricing",
 }
 RANK_DELTA_SOURCES = ("schwab_live", "tvt")
 
@@ -140,6 +141,11 @@ class Rules:
     # Which delta ranks the picks: "schwab_live" (from Schwab's option chain at
     # buying time) or "tvt" (the TVT-DELTA column of the pick list).
     rank_delta_source: str = "schwab_live"
+    # Cooper: a sell that has not filled after this many seconds is canceled and
+    # replaced at the current bid (never a market order), at most
+    # exit_reprice_max_attempts times; then a person is alerted. 0 attempts = off.
+    exit_reprice_after_seconds: int = 60
+    exit_reprice_max_attempts: int = 5
 
     def live_block_reason(self) -> str | None:
         """Why a live run must not start, or None. Dry runs ignore this."""
@@ -296,7 +302,16 @@ def load_rules(path: str | Path) -> Rules:
     if rank_source not in RANK_DELTA_SOURCES:
         raise ValueError(f"rank_delta_source must be one of: {', '.join(RANK_DELTA_SOURCES)}")
 
+    reprice_after = data.get("exit_reprice_after_seconds", 60)
+    reprice_max = data.get("exit_reprice_max_attempts", 5)
+    if isinstance(reprice_after, bool) or not isinstance(reprice_after, int) or not 10 <= reprice_after <= 3600:
+        raise ValueError("exit_reprice_after_seconds must be a whole number from 10 to 3600")
+    if isinstance(reprice_max, bool) or not isinstance(reprice_max, int) or not 0 <= reprice_max <= 20:
+        raise ValueError("exit_reprice_max_attempts must be a whole number from 0 to 20")
+
     return Rules(
+        exit_reprice_after_seconds=reprice_after,
+        exit_reprice_max_attempts=reprice_max,
         total_budget=budget,
         rank_delta_source=rank_source,
         stops_on_entry_day=stops_today,

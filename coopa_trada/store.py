@@ -149,6 +149,12 @@ class Store:
 
         with self.transaction():
             columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(orders)")}
+            if "reprice_attempt" not in columns:
+                # Exit repricing: 0 for the first sell order, n for its n-th replacement.
+                self.conn.execute("ALTER TABLE orders ADD COLUMN reprice_attempt INTEGER NOT NULL DEFAULT 0")
+                self.conn.execute("ALTER TABLE orders ADD COLUMN replaces_order_id INTEGER REFERENCES orders(id)")
+                # Set when the bot asked Schwab to cancel this order so it can be repriced.
+                self.conn.execute("ALTER TABLE orders ADD COLUMN cancel_requested_at_utc TEXT")
             if "trading_day" not in columns:
                 # The session an order was placed for. Decides whether a position is on its
                 # entry day or held from an earlier day. Legacy rows fall back to the fill date.
@@ -226,6 +232,8 @@ class Store:
         created_at: datetime | None = None,
         entry_order_id: int | None = None,
         trading_day=None,
+        replaces_order_id: int | None = None,
+        reprice_attempt: int = 0,
     ) -> int:
         """Insert a PENDING (or given-status) order row with its request JSON.
 
@@ -249,8 +257,8 @@ class Store:
                 INSERT INTO orders
                     (signal_id, intent, idempotency_key, mode, osi_symbol, side,
                      quantity, limit_price, status, created_at_utc, request_json, entry_order_id,
-                     trading_day)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     trading_day, replaces_order_id, reprice_attempt)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     signal_id,
@@ -266,6 +274,8 @@ class Store:
                     _json(request),
                     entry_order_id,
                     trading_day.isoformat() if hasattr(trading_day, "isoformat") else trading_day,
+                    replaces_order_id,
+                    int(reprice_attempt),
                 ),
             )
             return int(cur.lastrowid)
@@ -417,6 +427,16 @@ class Store:
             """, (mode, mode)
         ).fetchall()
 
+    def exit_orders(self, mode: str, entry_order_id: int) -> list[sqlite3.Row]:
+        """Every sell order for one entry, oldest first (the original, then replacements)."""
+        return self.conn.execute(
+            "SELECT * FROM orders WHERE intent='EXIT' AND mode=? AND entry_order_id=? ORDER BY id",
+            (mode, entry_order_id)).fetchall()
+
+    def set_cancel_requested(self, order_id: int, at: datetime | None) -> None:
+        self.conn.execute("UPDATE orders SET cancel_requested_at_utc = ? WHERE id = ?",
+                          (_iso(at) if at is not None else None, order_id))
+
     def committed_cents(self, mode: str) -> int:
         """What all open positions and working buy orders in ``mode`` cost, in cents.
 
@@ -547,8 +567,17 @@ class Store:
             WITH execution_totals AS (
                 SELECT order_id, SUM(quantity) AS quantity,
                        SUM(quantity * price) / SUM(quantity) AS price,
-                       MIN(filled_at_utc) AS filled_at_utc, MIN(id) AS id
+                       MIN(filled_at_utc) AS filled_at_utc, MAX(filled_at_utc) AS last_at_utc,
+                       MIN(id) AS id
                 FROM fills GROUP BY order_id
+            ),
+            -- All sell orders of one entry together: a repriced exit is several orders.
+            exit_totals AS (
+                SELECT xo.entry_order_id AS entry_id, SUM(xf.quantity) AS quantity,
+                       SUM(xf.quantity * xf.price) / SUM(xf.quantity) AS price,
+                       MAX(xf.last_at_utc) AS filled_at_utc
+                FROM orders xo JOIN execution_totals xf ON xf.order_id = xo.id
+                WHERE xo.intent = 'EXIT' GROUP BY xo.entry_order_id
             )
             SELECT
                 e.signal_id          AS signal_id,
@@ -558,23 +587,22 @@ class Store:
                 ef.quantity          AS quantity,
                 ef.price             AS entry_price,
                 ef.filled_at_utc     AS entry_at_utc,
-                xf.price             AS exit_price,
-                xf.quantity          AS exited_quantity,
-                xf.filled_at_utc     AS exit_at_utc,
+                xt.price             AS exit_price,
+                xt.quantity          AS exited_quantity,
+                xt.filled_at_utc     AS exit_at_utc,
                 ev.strategy          AS exit_strategy,
-                ev.reason            AS exit_reason
+                ev.reason            AS exit_reason,
+                (SELECT MAX(reprice_attempt) FROM orders r
+                  WHERE r.intent = 'EXIT' AND r.entry_order_id = e.id) AS exit_reprices
             FROM orders e
             JOIN execution_totals ef ON ef.order_id = e.id
             LEFT JOIN signals s ON s.id = e.signal_id
-            LEFT JOIN orders xo
-                   ON xo.intent = 'EXIT' AND xo.entry_order_id = e.id AND xo.mode = e.mode
-            LEFT JOIN execution_totals xf ON xf.order_id = xo.id
-            LEFT JOIN exit_events ev
-                   ON ev.order_id = xo.id AND ev.position_key = (e.signal_id || ':' || e.osi_symbol)
-                  AND ev.id = (
-                        SELECT MAX(id) FROM exit_events
-                        WHERE order_id = xo.id
-                  )
+            LEFT JOIN exit_totals xt ON xt.entry_id = e.id
+            -- Why it sold: the decision on the first sell order (replacements only lower the price).
+            LEFT JOIN exit_events ev ON ev.id = (
+                SELECT MIN(x.id) FROM exit_events x JOIN orders xo ON xo.id = x.order_id
+                WHERE xo.intent = 'EXIT' AND xo.entry_order_id = e.id AND xo.mode = e.mode
+                  AND x.position_key = (e.signal_id || ':' || e.osi_symbol))
             WHERE e.intent = 'ENTRY'
             ORDER BY ef.id
             """

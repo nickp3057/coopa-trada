@@ -43,6 +43,8 @@ OPTIONAL_DEFAULTS = {
     "held_exit_start": "open",
     "total_budget": 300.0,
     "rank_delta_source": "schwab_live",
+    "exit_reprice_after_seconds": 60,
+    "exit_reprice_max_attempts": 5,
 }
 # Which rule keys each confirmation marker covers.
 CONFIRMATION_KEYS = {
@@ -54,6 +56,7 @@ CONFIRMATION_KEYS = {
     "next_day_exits": ("held_exit_start",),
     "total_budget": ("total_budget",),
     "delta_ranking": ("rank_delta_source",),
+    "exit_repricing": ("exit_reprice_after_seconds", "exit_reprice_max_attempts"),
 }
 HOLD_NOTE = (
     "Cooper's hold rule: if the take-profit is reached on the day of entry, sell that day; "
@@ -112,6 +115,13 @@ def _describe(key: str, values: dict) -> str:
     if key == "ten_percent_stop":
         return (f"drop from peak {_pct_text(values.get('cooper_drop_from_peak_pct'))}, "
                 f"drop from entry {_pct_text(values.get('cooper_drop_from_entry_pct'))}")
+    if key == "exit_repricing":
+        after = values.get("exit_reprice_after_seconds", 60)
+        tries = values.get("exit_reprice_max_attempts", 5)
+        if not tries:
+            return "off: an unfilled sell is left at its price"
+        return (f"an unfilled sell is moved to the current bid after {after} s, "
+                f"up to {tries} times, then you are alerted (never a market order)")
     if key == "total_budget":
         budget = values.get("total_budget", OPTIONAL_DEFAULTS["total_budget"])
         return f"${float(budget):g} for all open positions together, checked against ask × 100"
@@ -216,6 +226,12 @@ def _coerce_payload(payload: dict) -> dict:
         out["total_budget"] = float(payload.get("total_budget", OPTIONAL_DEFAULTS["total_budget"]))
     except (TypeError, ValueError):
         raise RulesValidationError("total_budget must be a number") from None
+    for name in ("exit_reprice_after_seconds", "exit_reprice_max_attempts"):
+        value = payload.get(name, OPTIONAL_DEFAULTS[name])
+        try:
+            out[name] = int(value)
+        except (TypeError, ValueError):
+            raise RulesValidationError(f"{name} must be a whole number") from None
     out["rank_delta_source"] = payload.get("rank_delta_source", OPTIONAL_DEFAULTS["rank_delta_source"])
     stops = payload.get("stops_on_entry_day", OPTIONAL_DEFAULTS["stops_on_entry_day"])
     if type(stops) is not bool:
