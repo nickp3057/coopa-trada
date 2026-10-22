@@ -22,6 +22,7 @@ from .exits import (
     CompositeExit,
     HardTimeExit,
     PositionState,
+    ProfitPointTrail,
     Quote,
     StopLoss,
     TakeProfit,
@@ -128,6 +129,8 @@ class Engine:
             strategies.append(StopLoss(rules.cooper_drop_from_entry_pct))
         if rules.cooper_drop_from_peak_pct is not None:
             strategies.append(TrailingPeak(rules.cooper_drop_from_peak_pct))
+        if rules.profit_trail_points is not None:
+            strategies.append(ProfitPointTrail(rules.profit_trail_points, rules.profit_trail_arm))
         strategies += [
             StopLoss(rules.hard_stop_loss_pct),
             TakeProfit(rules.take_profit_pct),

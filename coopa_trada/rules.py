@@ -28,6 +28,7 @@ SETTING_LABELS = {
     "spending_cap": "spending cap",
     "ten_percent_stop": "10% stop basis",
     "delta_filter": "delta filter",
+    "profit_point_trail": "profit-point trailing exit",
 }
 
 
@@ -115,6 +116,10 @@ class Rules:
     # Optional existing strategies; null leaves the corresponding strategy unwired.
     cooper_drop_from_peak_pct: float | None = None
     cooper_drop_from_entry_pct: float | None = None
+    # Cooper's rule: sell when profit % drops this many points below its peak
+    # profit % (None = off). See exits.ProfitPointTrail.
+    profit_trail_points: float | None = 10.0
+    profit_trail_arm: str = "from_entry"
 
     def live_block_reason(self) -> str | None:
         """Why a live run must not start, or None. Dry runs ignore this."""
@@ -234,7 +239,19 @@ def load_rules(path: str | Path) -> Rules:
     cooper_peak = data.get("cooper_drop_from_peak_pct")
     cooper_entry = data.get("cooper_drop_from_entry_pct")
 
+    trail_points = data.get("profit_trail_points", 10.0)
+    if trail_points is not None:
+        trail_points = float(trail_points)
+        if not math.isfinite(trail_points) or not 0 < trail_points < 100:
+            raise ValueError("profit_trail_points must be between 0 and 100 (percentage points), or blank")
+    trail_arm = data.get("profit_trail_arm", "from_entry")
+    from .exits import PROFIT_TRAIL_ARMS
+    if trail_arm not in PROFIT_TRAIL_ARMS:
+        raise ValueError(f"profit_trail_arm must be one of: {', '.join(PROFIT_TRAIL_ARMS)}")
+
     return Rules(
+        profit_trail_points=trail_points,
+        profit_trail_arm=trail_arm,
         delta_filter=DeltaFilter.from_config(data.get("delta_filter")),
         setting_confirmations=setting_confirmations(data.get("setting_confirmations")),
         entry_minutes_before_close=entry_minutes,

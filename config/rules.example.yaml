@@ -33,6 +33,16 @@ take_profit_pct: 0.60
 cooper_drop_from_peak_pct: 0.10    # DEFAULT, NOT CONFIRMED
 cooper_drop_from_entry_pct:        # blank = not wired
 
+# Cooper's 10-point rule (his answer, 2026-10): sell when the profit % drops 10
+# percentage points below its peak profit %. Entry $1.00, peak $2.00 (+100%)
+# -> sell at $1.90 (+90%). Trigger price = peak - points/100 * entry.
+# Alongside every other exit; whichever fires first wins. Blank = off.
+# profit_trail_arm: from_entry (literal reading; before any gain it acts like a
+# -10% stop) or in_profit (only after the price has been above entry).
+# NEW SETTING, NOT CONFIRMED BY COOPER.
+profit_trail_points: 10
+profit_trail_arm: from_entry
+
 # Risk caps.
 max_concurrent_positions: 5
 # Spending cap per pick. Always buys exactly 1 contract; if that contract
@@ -68,4 +78,6 @@ setting_confirmations:
   ten_percent_stop:
     confirmed_by_cooper: false
   delta_filter:
+    confirmed_by_cooper: false
+  profit_point_trail:
     confirmed_by_cooper: false

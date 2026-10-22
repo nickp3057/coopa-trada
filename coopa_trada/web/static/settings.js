@@ -15,7 +15,9 @@ const PCT_OR_INT_FIELDS = [
   "trailing_stop_pct", "hard_stop_loss_pct", "take_profit_pct",
   "max_concurrent_positions", "max_dollars_per_position",
   "cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct",
+  "profit_trail_points",
 ];
+const TEXT_FIELDS = ["profit_trail_arm"];
 const DELTA_NUMBERS = ["min_abs_delta", "max_abs_delta"];
 
 let saved = null; // last response from the server
@@ -68,6 +70,11 @@ function fill(data) {
     const v = data[name];
     input.value = v === null || v === undefined ? "" : v;
   }
+  for (const name of TEXT_FIELDS) {
+    if (form.elements[name] && data[name] != null) form.elements[name].value = data[name];
+  }
+  const trailNote = document.getElementById("profit-trail-note");
+  if (trailNote) trailNote.textContent = data.profit_trail_note || "";
   renderExitWindow(data.exit_window || {});
   fillDelta(data.delta_filter || {});
   renderConfirmations(data);
@@ -79,6 +86,9 @@ function collect() {
     const input = form.elements[name];
     if (!input) continue;
     payload[name] = input.value === "" ? null : Number(input.value);
+  }
+  for (const name of TEXT_FIELDS) {
+    if (form.elements[name]) payload[name] = form.elements[name].value;
   }
   const ew = {};
   ewRows.querySelectorAll("input[data-ew]").forEach((inp) => {

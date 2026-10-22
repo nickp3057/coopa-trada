@@ -52,6 +52,24 @@
       </label>
     </fieldset>
 
+    <fieldset class="warn-fieldset">
+      <legend>Profit-point trailing exit (Cooper&rsquo;s 10-point rule)</legend>
+      <div class="confirm-row" data-confirm-key="profit_point_trail">
+        <span class="badge badge-warn" data-badge>Unconfirmed</span>
+        <label class="inline"><input type="checkbox" name="confirm_profit_point_trail"> Confirmed with Cooper</label>
+      </div>
+      <p class="hint" id="profit-trail-note"></p>
+      <label class="block">Percentage points below peak profit (blank = off)
+        <input name="profit_trail_points" type="number" min="0.01" max="99.99" step="0.01">
+      </label>
+      <label class="block">When it starts working
+        <select name="profit_trail_arm">
+          <option value="from_entry">From entry (acts like a stop before any gain)</option>
+          <option value="in_profit">Only once the position has been in profit</option>
+        </select>
+      </label>
+    </fieldset>
+
     <fieldset>
       <legend>Risk caps</legend>
       <label class="block">Max concurrent positions

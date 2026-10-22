@@ -27,11 +27,25 @@ DEFAULT_STOP_NOTE = (
     "The standard 25% / 40% / 60% exits remain active alongside it: adding triggers can "
     "make an exit earlier, never later. Confirm these defaults with Cooper before a live run."
 )
+PROFIT_TRAIL_NOTE = (
+    "Cooper's rule: sell when the profit % drops this many percentage points below its peak "
+    "profit %. Example: bought at $1.00, highest price $2.00 (+100%), 10 points -> sell at "
+    "$1.90 (+90%). It runs alongside every other exit; whichever fires first wins. "
+    '"From entry" (the literal reading) is active immediately, so before any gain it acts '
+    'like a -10% stop ($1.00 -> sells at $0.90). "Once in profit" waits until the price has '
+    "been above the entry price. Blank turns it off."
+)
+# Optional keys with their defaults (absent from older rules files).
+OPTIONAL_DEFAULTS = {
+    "profit_trail_points": 10.0,
+    "profit_trail_arm": "from_entry",
+}
 # Which rule keys each confirmation marker covers.
 CONFIRMATION_KEYS = {
     "spending_cap": ("max_dollars_per_position",),
     "ten_percent_stop": STOP_KEYS,
     "delta_filter": ("delta_filter",),
+    "profit_point_trail": ("profit_trail_points", "profit_trail_arm"),
 }
 SPENDING_COMMENT = """# Spending cap per pick. Always buys exactly 1 contract; if that contract
 # costs more than this, the ticker is skipped entirely.
@@ -75,6 +89,14 @@ def _describe(key: str, values: dict) -> str:
     if key == "ten_percent_stop":
         return (f"drop from peak {_pct_text(values.get('cooper_drop_from_peak_pct'))}, "
                 f"drop from entry {_pct_text(values.get('cooper_drop_from_entry_pct'))}")
+    if key == "profit_point_trail":
+        points = values.get("profit_trail_points", OPTIONAL_DEFAULTS["profit_trail_points"])
+        if points in (None, ""):
+            return "off"
+        arm = values.get("profit_trail_arm", OPTIONAL_DEFAULTS["profit_trail_arm"])
+        return (f"sell {float(points):g} percentage points below peak profit, "
+                + ("active from entry (acts as a stop before any gain)" if arm == "from_entry"
+                   else "active only once in profit"))
     delta = values.get("delta_filter") or {}
     if not delta.get("enabled"):
         return "off (picks assumed screened upstream)"
@@ -104,6 +126,7 @@ def read_rules_dict(config_path) -> dict:
         warning = str(exc)
     markers = setting_confirmations(raw.get("setting_confirmations"))
     out = {key: raw.get(key) for key in (*_REQUIRED_NUMERIC, *STOP_KEYS)}
+    out.update({key: raw.get(key, default) for key, default in OPTIONAL_DEFAULTS.items()})
     delta = {**asdict(DeltaFilter()), **(raw.get("delta_filter") or {})}
     metadata = [{**item, "current": _describe(item["key"], {**raw, "delta_filter": delta})}
                 for item in default_settings_metadata(markers)]
@@ -113,6 +136,7 @@ def read_rules_dict(config_path) -> dict:
         setting_confirmations=markers,
         default_settings=metadata,
         stop_keys=list(STOP_KEYS), default_stop_note=DEFAULT_STOP_NOTE,
+        profit_trail_note=PROFIT_TRAIL_NOTE,
         warning=warning, path=str(path),
     )
     return out
@@ -143,6 +167,12 @@ def _coerce_payload(payload: dict) -> dict:
             out[key] = None if value in (None, "", "null") else float(value)
         except (TypeError, ValueError):
             raise RulesValidationError(f"{key} must be a number or blank") from None
+    points = payload.get("profit_trail_points", OPTIONAL_DEFAULTS["profit_trail_points"])
+    try:
+        out["profit_trail_points"] = None if points in (None, "", "null") else float(points)
+    except (TypeError, ValueError):
+        raise RulesValidationError("profit_trail_points must be a number or blank") from None
+    out["profit_trail_arm"] = payload.get("profit_trail_arm", OPTIONAL_DEFAULTS["profit_trail_arm"])
     try:
         out["delta_filter"] = asdict(DeltaFilter.from_config(payload.get("delta_filter")))
     except (ValueError, TypeError) as exc:
@@ -154,6 +184,8 @@ def _render_yaml(body: dict) -> str:
     comments = {
         "cooper_drop_from_peak_pct": "\n".join("# " + line for line in [DEFAULT_STOP_NOTE]) + "\n",
         "max_dollars_per_position": SPENDING_COMMENT,
+        "profit_trail_points": "\n".join("# " + line for line in [PROFIT_TRAIL_NOTE]) + "\n"
+                               "# NEW SETTING, NOT CONFIRMED BY COOPER (arm default: from_entry).\n",
         "delta_filter": DELTA_COMMENT,
         "setting_confirmations": ("# Cooper-confirmation markers. Any false marker blocks live runs (dry runs are\n"
                                   "# never blocked). Changing a setting's value resets its marker.\n"),
@@ -172,6 +204,9 @@ def _covered_values(raw: dict, key: str):
         value = raw.get(name)
         if name == "delta_filter":
             out.append(asdict(DeltaFilter.from_config(value)))
+        elif name in OPTIONAL_DEFAULTS:
+            value = raw.get(name, OPTIONAL_DEFAULTS[name])
+            out.append(value if isinstance(value, str) or value is None else float(value))
         else:
             out.append(None if value in (None, "") else float(value))
     return out

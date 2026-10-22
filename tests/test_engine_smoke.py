@@ -176,8 +176,11 @@ def test_cooper_10pct_keys_wire_extra_exit_strategies_first(store, tmp_path):
     first, second = eng.composite.strategies[0], eng.composite.strategies[1]
     assert isinstance(first, StopLoss) and first.pct == 0.10
     assert isinstance(second, TrailingPeak) and second.pct == 0.10
-    # originals still present after the two prepended strategies
-    assert len(eng.composite.strategies) == 6
+    # originals still present after the two prepended strategies, plus Cooper's
+    # profit-point trail (on by default)
+    from coopa_trada.exits import ProfitPointTrail
+    assert len(eng.composite.strategies) == 7
+    assert sum(isinstance(s, ProfitPointTrail) for s in eng.composite.strategies) == 1
 
 
 def test_cooper_10pct_keys_are_optional(rules):

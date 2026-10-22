@@ -9,7 +9,7 @@ pytest.importorskip("flask")
 
 from coopa_trada.idempotency import Intent, make_key
 from coopa_trada.models import AssetClass, Right, Signal
-from coopa_trada.rules import load_rules
+from coopa_trada.rules import SETTING_LABELS, load_rules
 from coopa_trada.store import Store
 from coopa_trada.web import create_app
 from coopa_trada.web.config import WebPaths
@@ -91,14 +91,13 @@ def test_get_rules_returns_current_values(client):
     assert body["delta_filter"] == {
         "enabled": False, "source": "schwab", "min_abs_delta": 0.30, "max_abs_delta": 0.80,
     }
-    assert [s["key"] for s in body["default_settings"] if not s["confirmed_by_cooper"]] == [
-        "spending_cap", "ten_percent_stop", "delta_filter",
-    ]
+    unconfirmed = [s["key"] for s in body["default_settings"] if not s["confirmed_by_cooper"]]
+    assert unconfirmed[:3] == ["spending_cap", "ten_percent_stop", "delta_filter"]
+    assert unconfirmed == list(SETTING_LABELS)  # every new setting starts unconfirmed
 
 
 def _confirm(*keys):
-    return {key: {"confirmed_by_cooper": key in keys}
-            for key in ("spending_cap", "ten_percent_stop", "delta_filter")}
+    return {key: {"confirmed_by_cooper": key in keys} for key in SETTING_LABELS}
 
 
 def test_confirm_checkbox_persists_marker(client, paths):
@@ -244,9 +243,9 @@ def test_live_start_blocked_and_listed_while_settings_unconfirmed(client, monkey
     monkeypatch.setenv("LIVE_TRADING", "1")
     status = client.get("/api/run/status").get_json()
     assert status["live_blocked"] is True
-    assert [s["label"] for s in status["unconfirmed_settings"]] == [
-        "spending cap", "10% stop basis", "delta filter",
-    ]
+    labels = [s["label"] for s in status["unconfirmed_settings"]]
+    assert labels[:3] == ["spending cap", "10% stop basis", "delta filter"]
+    assert labels == list(SETTING_LABELS.values())
     assert "$1500" in status["unconfirmed_settings"][0]["current"]
     rv = client.post(
         "/api/run/start", json={"live": True, "confirm": "ENABLE LIVE TRADING"}
@@ -259,7 +258,7 @@ def test_live_start_blocked_and_listed_while_settings_unconfirmed(client, monkey
 def test_live_status_clears_once_all_confirmed(client):
     good = client.get("/api/rules").get_json()
     client.post("/api/rules", json={
-        **good, "setting_confirmations": _confirm("spending_cap", "ten_percent_stop", "delta_filter"),
+        **good, "setting_confirmations": _confirm(*SETTING_LABELS),
     })
     status = client.get("/api/run/status").get_json()
     assert status["live_blocked"] is False
