@@ -455,3 +455,29 @@ def confirm_picks(csv_text: str, trade_date: str) -> dict:
     else:
         message = "Picks confirmed. No run is active: start today's run to buy them."
     return {"signals_path": str(path), "date": trade_date, "message": message, "run_active": running}
+
+
+# -- Telegram intake ----------------------------------------------------
+def _telegram():
+    return current_app.config.get("COOPA_TELEGRAM")
+
+
+@bp.get("/api/telegram")
+def api_telegram():
+    bot = _telegram()
+    if bot is None:
+        return jsonify(configured=False, pending=[],
+                       hint="Telegram is off. Add TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_CHAT_IDS to .env "
+                            "(see docs/TELEGRAM_SETUP.md), then quit and reopen the app.")
+    return jsonify(configured=True, allowed_chats=len(bot.allowed), pending=bot.pending_previews(),
+                   ignored_chats=sorted(bot.ignored_chats))
+
+
+@bp.post("/api/telegram/<pid>/<action>")
+def api_telegram_resolve(pid: str, action: str):
+    bot = _telegram()
+    if bot is None or action not in ("confirm", "reject"):
+        return jsonify(error="Not found"), 404
+    outcome = bot.resolve(pid, confirm=action == "confirm", via="dashboard")
+    status = 200 if outcome["ok"] else 409
+    return jsonify(message=outcome["message"], pending=bot.pending_previews()), status

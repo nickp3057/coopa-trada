@@ -17,7 +17,7 @@ from .config import WebPaths, paths_from_env
 from .runner import EngineRunner
 from .views import bp
 
-__all__ = ["create_app", "WebPaths", "EngineRunner"]
+__all__ = ["create_app", "start_telegram", "WebPaths", "EngineRunner"]
 
 
 def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None,
@@ -50,4 +50,27 @@ def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None
     # Held only once a watchdog is started (desktop app / python -m coopa_trada.web).
     app.config["COOPA_KEEPAWAKE"] = KeepAwake()
     app.register_blueprint(bp)
+
+    # Telegram intake (optional): built here so its Confirm button saves picks exactly
+    # like the dashboard; polling starts only in the real app (see start_telegram).
+    from .. import telegram_bot
+
+    def confirm_from_telegram(csv_text, trade_date):
+        from .views import confirm_picks
+        with app.app_context():
+            return confirm_picks(csv_text, trade_date)
+
+    app.config["COOPA_TELEGRAM"] = telegram_bot.from_env(
+        confirm=confirm_from_telegram, run_status=runner.snapshot)
     return app
+
+
+def start_telegram(app):
+    """Start long-polling Telegram when it is configured. Returns the poller or None."""
+    from ..telegram_bot import TelegramPoller
+    intake = app.config.get("COOPA_TELEGRAM")
+    if intake is None:
+        return None
+    poller = TelegramPoller(intake).start()
+    app.config["COOPA_TELEGRAM_POLLER"] = poller
+    return poller

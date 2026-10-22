@@ -3,6 +3,13 @@
 {% block content %}
 <div id="schwab-banner" class="alert" role="alert" hidden></div>
 <div id="attention-banner" class="alert alert-error" role="alert" hidden></div>
+<section class="card" id="telegram-card" hidden>
+  <h2>Picks sent by Telegram</h2>
+  <p class="hint">Lists forwarded to the Telegram bot wait here as well as in Telegram.
+    Confirm in either place. Nothing is bought until a list is confirmed.</p>
+  <div id="telegram-pending"></div>
+  <p id="telegram-msg" class="msg" role="status"></p>
+</section>
 <section class="card">
   <h1>Upload your picks</h1>
   <p class="hint">Upload Cooper’s CSV or a screenshot of the five-column table. Check every contract and the full dates before selecting the list.</p>
@@ -90,4 +97,4 @@
   <p id="reconnect-msg" class="msg" role="status"></p>
 </section>
 {% endblock %}
-{% block script %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script><script src="{{ url_for('static', filename='imports.js') }}"></script>{% endblock %}
+{% block script %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script><script src="{{ url_for('static', filename='imports.js') }}"></script><script src="{{ url_for('static', filename='telegram.js') }}"></script>{% endblock %}

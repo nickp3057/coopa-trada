@@ -15,7 +15,7 @@ import argparse
 import os
 
 from ..config import load_env
-from . import create_app
+from . import create_app  # noqa: F401
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -36,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
                             keep_awake=app.config["COOPA_KEEPAWAKE"]).start()
         app.config["COOPA_RUNNER"].on_change = watchdog.poke
         app.config["COOPA_WATCHDOG"] = watchdog
+        from . import start_telegram
+        start_telegram(app)
     print(
         f"Coopa Trada UI on http://{args.host}:{args.port}\n"
         f"  rules   : {paths.config_path}\n"
