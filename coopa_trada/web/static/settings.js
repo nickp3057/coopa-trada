@@ -11,7 +11,7 @@ const noteEl = document.getElementById("ambiguous-note");
 const ewRows = document.getElementById("exit-window-rows");
 
 const PCT_OR_INT_FIELDS = [
-  "entry_minutes_before_close", "poll_interval_seconds",
+  "earliest_buy_minutes_before_close", "no_new_buys_minutes_before_close", "poll_interval_seconds",
   "trailing_stop_pct", "hard_stop_loss_pct", "take_profit_pct",
   "total_budget", "max_dollars_per_position",
   "exit_reprice_after_seconds", "exit_reprice_max_attempts",

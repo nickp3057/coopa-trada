@@ -34,6 +34,7 @@ SETTING_LABELS = {
     "total_budget": "total budget",
     "delta_ranking": "which delta ranks picks",
     "exit_repricing": "exit repricing",
+    "buy_window": "buying window",
 }
 RANK_DELTA_SOURCES = ("schwab_live", "tvt")
 
@@ -109,7 +110,6 @@ class DeltaFilter:
 
 @dataclass(frozen=True)
 class Rules:
-    entry_minutes_before_close: int
     exit_window: dict[AssetClass, tuple[time | int, time | int]]
     trailing_stop_pct: float
     hard_stop_loss_pct: float
@@ -144,6 +144,12 @@ class Rules:
     # Cooper: a sell that has not filled after this many seconds is canceled and
     # replaced at the current bid (never a market order), at most
     # exit_reprice_max_attempts times; then a person is alerted. 0 attempts = off.
+    # Buying happens when picks are confirmed (Telegram or the dashboard), not at
+    # a fixed time, but only inside this window, counted back from the real close
+    # (half days included): no buys before `earliest` (a guard against a list
+    # confirmed hours early) and none at or after `no_new_buys`.
+    earliest_buy_minutes_before_close: int = 30
+    no_new_buys_minutes_before_close: int = 3
     exit_reprice_after_seconds: int = 60
     exit_reprice_max_attempts: int = 5
 
@@ -241,7 +247,6 @@ def load_rules(path: str | Path) -> Rules:
         raise ValueError(f"{path}: top-level YAML must be a mapping")
 
     required = {
-        "entry_minutes_before_close",
         "exit_window",
         "trailing_stop_pct",
         "hard_stop_loss_pct",
@@ -253,9 +258,17 @@ def load_rules(path: str | Path) -> Rules:
     if missing:
         raise ValueError(f"{path}: missing rule keys: {', '.join(sorted(missing))}")
 
-    entry_minutes = int(data["entry_minutes_before_close"])
-    if entry_minutes <= 0:
-        raise ValueError("entry_minutes_before_close must be positive")
+    # entry_minutes_before_close (a fixed buying time) was replaced by buying when
+    # picks are confirmed; older files may still carry it and it is ignored.
+    buy_window = {}
+    for name, default in (("earliest_buy_minutes_before_close", 30), ("no_new_buys_minutes_before_close", 3)):
+        value = data.get(name, default)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 390:
+            raise ValueError(f"{name} must be a whole number of minutes from 0 to 390")
+        buy_window[name] = value
+    if buy_window["earliest_buy_minutes_before_close"] <= buy_window["no_new_buys_minutes_before_close"]:
+        raise ValueError("earliest_buy_minutes_before_close must be more minutes before the close "
+                         "than no_new_buys_minutes_before_close")
 
     max_dollars = float(data["max_dollars_per_position"])
     if not math.isfinite(max_dollars) or max_dollars <= 0:
@@ -320,7 +333,7 @@ def load_rules(path: str | Path) -> Rules:
         profit_trail_arm=trail_arm,
         delta_filter=DeltaFilter.from_config(data.get("delta_filter")),
         setting_confirmations=setting_confirmations(data.get("setting_confirmations")),
-        entry_minutes_before_close=entry_minutes,
+        **buy_window,
         exit_window=_coerce_exit_window(data["exit_window"]),
         trailing_stop_pct=_pct("trailing_stop_pct", data["trailing_stop_pct"]),
         hard_stop_loss_pct=_pct("hard_stop_loss_pct", data["hard_stop_loss_pct"]),

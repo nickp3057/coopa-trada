@@ -54,6 +54,7 @@ class EngineRunner:
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._engine = None
 
         self.status = "idle"  # "idle" | "running"
         self.mode = Mode.DRY_RUN.value
@@ -73,6 +74,7 @@ class EngineRunner:
             "last_result": self.last_result,
             "signals_path": self._paths.signals_path,
             "stop_requested": self._stop.is_set(),
+            "activity": getattr(self._engine, "status_note", None) if self.status == "running" else None,
         }
 
     # -- control ----------------------------------------------------
@@ -119,8 +121,15 @@ class EngineRunner:
             if not CalendarService().is_trading_day(day):
                 raise RuntimeError(f"{day.isoformat()} is not an XNYS trading day")
 
+            from ..models import CsvSignalSource
+            from ..picks import PickListSource, imports_dir
+
+            # Today's latest confirmed list (dashboard or Telegram), read on every tick,
+            # so confirming picks during the run makes it buy them.
+            source = PickListSource(imports_dir(paths.db_path), fallback=CsvSignalSource(paths.signals_path))
             engine, store = build_engine(
                 mode=mode,
+                source=source,
                 signals_path=paths.signals_path,
                 config_path=paths.config_path,
                 db_path=paths.db_path,
@@ -128,6 +137,7 @@ class EngineRunner:
                 now=self._now,
                 alerter=self.alerter,
             )
+            self._engine = engine
             engine.run(day)
             self.last_result = "run complete"
         except RunStopped:
@@ -144,6 +154,7 @@ class EngineRunner:
                 except Exception:  # pragma: no cover - best effort
                     pass
             self.status = "idle"
+            self._engine = None
             self.last_finished = _now_iso()
             self._stop.clear()
             self._changed()

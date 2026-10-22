@@ -429,19 +429,29 @@ def api_signals_preview():
 @bp.post("/api/signals/confirm")
 def api_signals_confirm():
     from itsdangerous import BadSignature
-    from uuid import uuid4
     body = request.get_json(silent=True) or {}
     try:
         preview = _preview_signer().loads(body.get("token", ""), max_age=3600)
     except (BadSignature, TypeError):
         return jsonify(error="Preview expired or changed. Preview the picks again."), 400
+    return jsonify(**confirm_picks(preview["csv"], preview["date"]))
+
+
+def confirm_picks(csv_text: str, trade_date: str) -> dict:
+    """Save a previewed list as the day's confirmed picks (dashboard and Telegram).
+
+    Allowed while a run is active: that run reads confirmed lists on every tick
+    and buys the picks at once if the time is inside the buying window.
+    """
+    from ..picks import save_confirmed_list
     runner = _runner()
     with runner._lock:
-        if runner.status == "running":
-            return jsonify(error="Stop the current run before selecting new picks"), 409
-        directory = Path(_paths().db_path).resolve().parent / "imports"
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{preview['date']}-{uuid4().hex}.csv"
-        path.write_text(preview["csv"], encoding="utf-8")
+        path = save_confirmed_list(_paths().db_path, csv_text, trade_date)
         _paths().signals_path = str(path)
-    return jsonify(signals_path=str(path), date=preview["date"], message="Picks selected. Start a dry run when ready.")
+        running = runner.status == "running"
+    if running:
+        message = ("Picks confirmed. The run in progress buys them now if it is inside the buying "
+                   "window (and if the run is for this trade date).")
+    else:
+        message = "Picks confirmed. No run is active: start today's run to buy them."
+    return {"signals_path": str(path), "date": trade_date, "message": message, "run_active": running}

@@ -303,7 +303,7 @@ def test_cancellation_racing_with_a_fill_is_still_exited(store):
             self.canceled = True  # The entry filled just before cancellation reached Schwab.
             return response({}, 200)
     client = RacingClient()
-    now = [NOW.replace(minute=57)]
+    now = [NOW.replace(minute=56)]  # 3:56 PM ET: the last minute before the no-new-buys cutoff
     def sleep(seconds):
         now[0] += timedelta(seconds=seconds)
         assert now[0] <= NOW.replace(hour=20, minute=0)

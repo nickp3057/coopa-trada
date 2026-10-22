@@ -84,6 +84,7 @@ def build_engine(
     now: Callable[[], datetime] | None = None,
     sleep: Callable[[float], None] | None = None,
     alerter=None,
+    source=None,
 ) -> tuple[Engine, Store]:
     """Assemble a fully wired :class:`Engine` plus the :class:`Store` it uses.
 
@@ -104,7 +105,8 @@ def build_engine(
 
     rules = load_rules(config_path)
     cal = CalendarService()
-    source = CsvSignalSource(str(signals_path))
+    if source is None:
+        source = CsvSignalSource(str(signals_path))
 
     if mode is Mode.LIVE:
         from .broker import SchwabBroker, SchwabQuoteSource

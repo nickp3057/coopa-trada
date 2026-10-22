@@ -66,6 +66,7 @@ function renderStatus(s) {
 
   let txt = running ? "RUNNING" : "idle";
   if (running && s.last_started) txt += " since " + CT.fmtTime(s.last_started);
+  if (running && s.activity) txt += " · " + s.activity;
   if (!running && s.last_finished) {
     txt += " · last run " + CT.fmtTime(s.last_finished);
     if (s.last_result) txt += " (" + s.last_result + ")";
@@ -125,7 +126,7 @@ function fmtRemaining(ms) {
 function renderCountdown() {
   if (!tokenExpiresAt) { schwabCountdown.textContent = ""; return; }
   schwabCountdown.textContent = "Login expires in " + fmtRemaining(tokenExpiresAt - Date.now()) +
-    " (" + tokenExpiresAt.toLocaleString() + ")";
+    " (" + CT.fmtTime(tokenExpiresAt) + ")";
 }
 
 async function loadToken() {

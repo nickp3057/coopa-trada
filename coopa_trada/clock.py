@@ -29,6 +29,7 @@ __all__ = [
     "iso_utc",
     "parse_iso",
     "combine_market",
+    "fmt_display",
 ]
 
 
@@ -75,3 +76,10 @@ def parse_iso(value: str) -> datetime:
 def combine_market(d: date, t: time) -> datetime:
     """Wall-clock ``t`` on date ``d`` in ``MARKET_TZ``, tz-aware."""
     return datetime.combine(d, t, tzinfo=MARKET_TZ)
+
+
+def fmt_display(dt: datetime, *, with_day: bool = True) -> str:
+    """How a time is shown to a person: Mountain time, e.g. ``Mon Oct 19, 2:29 PM MT``."""
+    d = to_display(dt)
+    hm = d.strftime("%I:%M %p").lstrip("0") + " MT"
+    return f"{d:%a %b} {d.day}, {hm}" if with_day else hm

@@ -145,6 +145,8 @@ class Engine:
         self.alerter = alerter if alerter is not None else Alerter()
         # "starting" until the entry pass begins; a failure before then is a refused run.
         self.phase = "starting"
+        # One line for the dashboard: what the run is doing now.
+        self.status_note = "starting"
 
         # Optional 10% readings coexist with the standard exits. First trigger wins.
         strategies: list = []
@@ -288,28 +290,96 @@ class Engine:
         if report.divergences:
             raise RuntimeError("Reconciliation found divergences; resolve them before starting trading")
 
-        entry_time = self.cal.entry_at(day, self.rules.entry_minutes_before_close)
-        self.log.info("entry scheduled for %s", clock.to_market(entry_time).isoformat())
-        if not once:
-            # Positions held from an earlier day are managed while waiting.
-            self._wait_until(entry_time, day)
-            # The login may have aged past the hold while waiting for entry time.
-            self._check_schwab_token(day)
-
         if self.mode is Mode.LIVE and self._now() >= self.cal.session_close(day):
             raise ValueError("Cannot start a live run after market close")
-        self.phase = "trading"
-        self._entry_pass(day)
-
         if once:
+            self.phase = "trading"
+            self._entry_pass(day)
             self._exit_tick(day)
             self.log.info("once=True: one entry pass + one exit tick complete")
             return
+        now = self._now()
+        if clock.to_market(now).date() != day or now >= self.cal.session_close(day):
+            # Practice replay of another day, or after the close (never LIVE: refused
+            # above): buy the day's picks at once, then manage exits as usual.
+            self.log.info("practice replay of %s: the buying window is not applied", day.isoformat())
+            self.phase = "trading"
+            self._entry_pass(day)
+            self._exit_loop(day)
+            return
+        self._trading_loop(day)
 
-        self._exit_loop(day)
+    def _trading_loop(self, day: date) -> None:
+        """A run on today's date, in real time.
+
+        Buying is triggered by confirmed picks, not a fixed clock time: each tick
+        the signal source is read, and picks not seen before are bought at once
+        if the time is inside the buying window (see CalendarService.buy_window).
+        Picks confirmed after the no-new-buys cutoff are skipped and logged.
+        Open positions (including ones held from earlier days) are managed on
+        every tick. The run ends after the cutoff once no order is working and
+        nothing is open except positions deliberately held overnight.
+        """
+        earliest, cutoff = self.cal.buy_window(day, self.rules)
+        close = self.cal.session_close(day)
+        self.log.info("buying when picks are confirmed, from %s until %s",
+                      clock.fmt_display(earliest), clock.fmt_display(cutoff, with_day=False))
+        seen: set[str] = set()
+        while True:
+            now = self._now()
+            if now >= earliest:
+                fresh = [s for s in self.source.fetch(day) if s.id not in seen]
+                if fresh:
+                    seen.update(s.id for s in fresh)
+                    if now < cutoff:
+                        # The login may have aged since the start: check it again before buying.
+                        self._check_schwab_token(day)
+                        self.phase = "trading"
+                        self._entry_pass(day, fresh)
+                    else:
+                        for signal in fresh:
+                            self._skip_after_cutoff(signal, day, cutoff)
+            if self.store.open_positions(self.mode.value) or self.store.orders_open(self.mode.value):
+                self.phase = "trading"
+                # Cancel first, so a fill that races the cancel is managed in this same tick.
+                self._cancel_stale_entries(day)
+                self._exit_tick(day)
+            pending = self.store.orders_open(self.mode.value)
+            positions = self.store.open_positions(self.mode.value)
+            self.status_note = self._describe_state(now, earliest, cutoff, positions)
+            if now >= cutoff and not pending:
+                if not positions:
+                    self.log.info("buying window over; all positions closed and orders settled")
+                    return
+                if self._only_overnight_holds(day):
+                    self.log.info("holding %d position(s) to the next trading day (take-profit not reached)",
+                                  len(positions))
+                    return
+            if self._now() >= close:
+                raise RuntimeError("Market closed with unsettled orders or positions; check Schwab before restarting")
+            self._sleep(self._next_sleep())
+
+    def _describe_state(self, now, earliest, cutoff, positions) -> str:
+        watching = f"; watching {len(positions)} position{'s' if len(positions) != 1 else ''}" if positions else ""
+        if now < earliest:
+            return (f"waiting for today's picks: buys from {clock.fmt_display(earliest, with_day=False)} "
+                    f"until {clock.fmt_display(cutoff, with_day=False)}{watching}")
+        if now < cutoff:
+            return f"buying confirmed picks until {clock.fmt_display(cutoff, with_day=False)}{watching}"
+        return "no new buys today" + watching
+
+    def _skip_after_cutoff(self, signal, day: date, cutoff: datetime) -> None:
+        if self.store.conn.execute(
+                "SELECT 1 FROM orders WHERE intent='ENTRY' AND signal_id=? AND mode=? AND trading_day=?",
+                (signal.id, self.mode.value, day.isoformat())).fetchone():
+            return  # already bought earlier today (e.g. before a restart)
+        self.store.record_signal(signal)
+        self._record_skip(signal, day, "cutoff",
+                          f"confirmed after the no-new-buys cutoff ({clock.fmt_display(cutoff, with_day=False)})",
+                          {"cutoff": cutoff.isoformat()})
 
     # -- entry ----------------------------------------------
-    def _entry_pass(self, day: date) -> None:
+    def _entry_pass(self, day: date, signals=None) -> None:
         """Buy today's picks, highest delta first, while each fits the budget.
 
         Every pick goes through the same gates as before (expiration, exit
@@ -321,8 +391,9 @@ class Engine:
         skipped (and logged); cheaper picks after it are still considered.
         Every skip is recorded with its reason.
         """
-        signals = self.source.fetch(day)
-        self.log.info("fetched %d signal(s) for %s", len(signals), day.isoformat())
+        if signals is None:
+            signals = self.source.fetch(day)
+        self.log.info("considering %d pick(s) for %s", len(signals), day.isoformat())
         candidates = []
         for signal in signals:
             if signal.expiration is None or signal.expiration < day:
@@ -695,17 +766,22 @@ class Engine:
                 self.log.info("holding %d position(s) to the next trading day (take-profit not reached)",
                               len(positions))
                 return
-            if self.mode is Mode.LIVE:
-                for order in pending:
-                    if order["intent"] != "ENTRY" or order["status"] == "UNKNOWN":
-                        continue  # an unknown order cannot be canceled; a person resolves it
-                    ac = self._asset_class_for(order["signal_id"], {})
-                    _, end = self.cal.exit_window(day, ac, self.rules)
-                    if self._now() >= end:
-                        self.broker.cancel_entry(order)
+            self._cancel_stale_entries(day)
             if self._now() >= self.cal.session_close(day):
                 raise RuntimeError("Market closed with unsettled orders or positions; check Schwab before restarting")
             self._sleep(self._next_sleep())
+
+    def _cancel_stale_entries(self, day: date) -> None:
+        """Buy orders still unfilled at their exit-window end are canceled (real orders)."""
+        if self.mode is not Mode.LIVE:
+            return
+        for order in self.store.orders_open(self.mode.value):
+            if order["intent"] != "ENTRY" or order["status"] == "UNKNOWN":
+                continue  # an unknown order cannot be canceled; a person resolves it
+            ac = self._asset_class_for(order["signal_id"], {})
+            _, end = self.cal.exit_window(day, ac, self.rules)
+            if self._now() >= end:
+                self.broker.cancel_entry(order)
 
     def _only_overnight_holds(self, day: date) -> bool:
         """Every open position was bought today, may be held overnight, and
@@ -719,15 +795,3 @@ class Engine:
         if self.quote_source is None:
             raise RuntimeError("engine has no quote_source; cannot run the exit loop")
         return self.quote_source(osi_symbol)
-
-    def _wait_until(self, target: datetime, day: date | None = None) -> None:
-        target = clock.ensure_aware(target)
-        while True:
-            remaining = (target - self._now()).total_seconds()
-            if remaining <= 0:
-                return
-            if day is not None and (self.store.open_positions(self.mode.value)
-                                    or self.store.orders_open(self.mode.value)):
-                self.phase = "trading"
-                self._exit_tick(day)
-            self._sleep(min(remaining, max(self.rules.poll_interval_seconds, 1)))

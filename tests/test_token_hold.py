@@ -53,7 +53,7 @@ def test_friday_entry_needs_the_login_through_monday(tmp_path):
     assert hold_needed_until(CAL, RULES, fri) == ny(2026, 10, 19, 16, 29)
     # Lasting through Friday's session (the old rule) or the weekend is not enough.
     assert "before this run finishes" in gate(tmp_path, fri, now, ny(2026, 10, 17, 10, 0))
-    assert "Mon Oct 19, 4:29 PM ET" in gate(tmp_path, fri, now, ny(2026, 10, 19, 16, 0))
+    assert "Mon Oct 19, 2:29 PM MT" in gate(tmp_path, fri, now, ny(2026, 10, 19, 16, 0))
     assert gate(tmp_path, fri, now, ny(2026, 10, 19, 17, 0)) is None
 
 
@@ -67,10 +67,11 @@ def test_pre_holiday_entry_skips_the_holiday(tmp_path):
 
 
 def test_entry_before_a_half_day_uses_that_days_early_close(tmp_path):
-    # Thanksgiving: Wed entry, Thu closed, Fri closes at 1 PM. The 15:35 start of
-    # the single-name window cannot resolve that day, so its close stands in.
+    # Thanksgiving: Wed entry, Thu closed, Fri closes at 1 PM. The exit windows
+    # move with the early close (half-day fix), so the latest one (ETF) ends
+    # 1 minute before 1 PM.
     wed, now = date(2026, 11, 25), ny(2026, 11, 25, 15, 30)
-    assert hold_needed_until(CAL, RULES, wed) == ny(2026, 11, 27, 13, 0) + START_MARGIN
+    assert hold_needed_until(CAL, RULES, wed) == ny(2026, 11, 27, 12, 59) + START_MARGIN
     assert gate(tmp_path, wed, now, ny(2026, 11, 27, 13, 15)) is not None
     assert gate(tmp_path, wed, now, ny(2026, 11, 27, 14, 0)) is None
 
@@ -81,7 +82,7 @@ def test_login_expiring_overnight_is_refused(tmp_path):
     # It would have passed the old same-day rule (close + 30 minutes).
     status = read_token_status(token_expiring(tmp_path / "t.json", overnight), now)
     assert start_block_reason(status, CAL.session_close(tue) + START_MARGIN) is None
-    assert "Tue Oct 13, 11:00 PM ET" in gate(tmp_path, tue, now, overnight)
+    assert "Tue Oct 13, 9:00 PM MT" in gate(tmp_path, tue, now, overnight)
 
 
 # -- engine ---------------------------------------------------------------------
@@ -156,7 +157,7 @@ def test_dashboard_warns_when_the_login_will_not_cover_the_next_run(tmp_path):
     # More than 2 days left, so it is not "expiring soon", but it still cannot cover Monday.
     assert friday["state"] == "connected"
     assert (friday["covers_next_run"], friday["warning"]) == (False, True)
-    assert "Mon Oct 19, 4:29 PM ET" in friday["hold_message"]
+    assert "Mon Oct 19, 2:29 PM MT" in friday["hold_message"]
 
     path = token_expiring(tmp_path / "t.json", ny(2026, 10, 20, 16, 0))
     ok = token_status(_creds(path), ny(2026, 10, 16, 12, 0), "config/rules.example.yaml")

@@ -1,13 +1,20 @@
 # Coopa Trada trading rules. Copy to config/rules.yaml and tune.
 # Every value is validated on load (see coopa_trada/rules.py).
 
-# How long before the session close to place entries. The calendar service
-# turns this into an absolute instant using the real XNYS close for the day
-# (half days included) -- never a hardcoded 16:00.
-entry_minutes_before_close: 20
+# Buying is triggered by confirming the day's picks (Telegram or the
+# dashboard), not by a fixed clock time. Cooper's picks arrive 1:40-1:55 PM
+# Mountain. Buys only happen inside this window, counted back from the real
+# XNYS close (half days included):
+#   earliest_buy_minutes_before_close: no buys before this (a guard against a
+#     list confirmed hours early). 30 = 1:30 PM MT on a normal day.
+#   no_new_buys_minutes_before_close: no buys at or after this. 3 = 1:57 PM MT.
+# NEW SETTINGS, NOT CONFIRMED BY COOPER.
+earliest_buy_minutes_before_close: 30
+no_new_buys_minutes_before_close: 3
 
 # Exit-management window, per asset class. Each endpoint is either:
-#   - "HH:MM"  -> a wall-clock time in America/New_York on the session date, or
+#   - "HH:MM"  -> a wall-clock time in America/New_York on the session date
+#                 (on half days it moves earlier by as much as the close does), or
 #   - an int   -> that many minutes before the real session close.
 # Start and end may mix the two forms.
 exit_window:
@@ -120,4 +127,6 @@ setting_confirmations:
   delta_ranking:
     confirmed_by_cooper: false
   exit_repricing:
+    confirmed_by_cooper: false
+  buy_window:
     confirmed_by_cooper: false

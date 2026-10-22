@@ -9,18 +9,33 @@
   <form id="rules-form">
     <fieldset>
       <legend>Timing</legend>
-      <label class="block">Entry, minutes before close
-        <input name="entry_minutes_before_close" type="number" min="1" step="1" required>
-      </label>
       <label class="block">Exit-loop poll interval (seconds)
         <input name="poll_interval_seconds" type="number" min="1" step="1" required>
       </label>
     </fieldset>
 
+    <fieldset class="warn-fieldset">
+      <legend>Buying window (buys happen when picks are confirmed)</legend>
+      <div class="confirm-row" data-confirm-key="buy_window">
+        <span class="badge badge-warn" data-badge>Unconfirmed</span>
+        <label class="inline"><input type="checkbox" name="confirm_buy_window"> Confirmed with Cooper</label>
+      </div>
+      <p class="hint">The bot buys as soon as a pick list is confirmed (Telegram or this
+        dashboard), but only inside this window, counted back from the real close, so half
+        days move it earlier. On a normal day the close is 2:00 PM Mountain.</p>
+      <label class="block">Earliest buy, minutes before the close (30 = 1:30 PM MT)
+        <input name="earliest_buy_minutes_before_close" type="number" min="1" max="390" step="1" required>
+      </label>
+      <label class="block">No new buys after, minutes before the close (3 = 1:57 PM MT)
+        <input name="no_new_buys_minutes_before_close" type="number" min="0" max="389" step="1" required>
+      </label>
+    </fieldset>
+
     <fieldset>
       <legend>Exit window (per asset class)</legend>
-      <p class="hint">Each endpoint is <code>HH:MM</code> (New York wall clock) or a
-        whole number of minutes before the real session close.</p>
+      <p class="hint">Each endpoint is <code>HH:MM</code> New York time (2 hours ahead of
+        Mountain: 15:35 ET = 1:35 PM MT) or a whole number of minutes before the real session
+        close. On half days, New York times move earlier by as much as the close does.</p>
       <div id="exit-window-rows"></div>
     </fieldset>
 

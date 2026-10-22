@@ -45,6 +45,8 @@ OPTIONAL_DEFAULTS = {
     "rank_delta_source": "schwab_live",
     "exit_reprice_after_seconds": 60,
     "exit_reprice_max_attempts": 5,
+    "earliest_buy_minutes_before_close": 30,
+    "no_new_buys_minutes_before_close": 3,
 }
 # Which rule keys each confirmation marker covers.
 CONFIRMATION_KEYS = {
@@ -57,6 +59,7 @@ CONFIRMATION_KEYS = {
     "total_budget": ("total_budget",),
     "delta_ranking": ("rank_delta_source",),
     "exit_repricing": ("exit_reprice_after_seconds", "exit_reprice_max_attempts"),
+    "buy_window": ("earliest_buy_minutes_before_close", "no_new_buys_minutes_before_close"),
 }
 HOLD_NOTE = (
     "Cooper's hold rule: if the take-profit is reached on the day of entry, sell that day; "
@@ -87,7 +90,7 @@ DELTA_COMMENT = """# Delta filtering. Off by default -- we assume Cooper's sourc
 # both thresholds must be > 1.0 (e.g. 30 and 80); no automatic rescaling.
 """
 _REQUIRED_NUMERIC = {
-    "entry_minutes_before_close": int, "trailing_stop_pct": float,
+    "trailing_stop_pct": float,
     "hard_stop_loss_pct": float, "take_profit_pct": float,
     "max_dollars_per_position": float,
     "poll_interval_seconds": int,
@@ -115,6 +118,12 @@ def _describe(key: str, values: dict) -> str:
     if key == "ten_percent_stop":
         return (f"drop from peak {_pct_text(values.get('cooper_drop_from_peak_pct'))}, "
                 f"drop from entry {_pct_text(values.get('cooper_drop_from_entry_pct'))}")
+    if key == "buy_window":
+        early = values.get("earliest_buy_minutes_before_close", 30)
+        late = values.get("no_new_buys_minutes_before_close", 3)
+        return (f"buys as soon as picks are confirmed, from {early} min before the close until "
+                f"{late} min before it (normally {_mt_before_close(early)}–{_mt_before_close(late)}; "
+                f"earlier on half days)")
     if key == "exit_repricing":
         after = values.get("exit_reprice_after_seconds", 60)
         tries = values.get("exit_reprice_max_attempts", 5)
@@ -150,6 +159,14 @@ def _describe(key: str, values: dict) -> str:
     if not delta.get("enabled"):
         return "off (picks assumed screened upstream)"
     return f"on: |{delta.get('source')} delta| in [{delta.get('min_abs_delta'):g}, {delta.get('max_abs_delta'):g}]"
+
+
+def _mt_before_close(minutes) -> str:
+    """Minutes before a normal 4:00 PM ET close, as a Mountain-time clock reading."""
+    from datetime import datetime, timedelta
+    from ..clock import MARKET_TZ, fmt_display
+    close = datetime(2026, 1, 5, 16, 0, tzinfo=MARKET_TZ)  # any regular session day
+    return fmt_display(close - timedelta(minutes=int(minutes)), with_day=False)
 
 
 def live_status(config_path) -> dict:
@@ -226,7 +243,8 @@ def _coerce_payload(payload: dict) -> dict:
         out["total_budget"] = float(payload.get("total_budget", OPTIONAL_DEFAULTS["total_budget"]))
     except (TypeError, ValueError):
         raise RulesValidationError("total_budget must be a number") from None
-    for name in ("exit_reprice_after_seconds", "exit_reprice_max_attempts"):
+    for name in ("exit_reprice_after_seconds", "exit_reprice_max_attempts",
+                 "earliest_buy_minutes_before_close", "no_new_buys_minutes_before_close"):
         value = payload.get(name, OPTIONAL_DEFAULTS[name])
         try:
             out[name] = int(value)
