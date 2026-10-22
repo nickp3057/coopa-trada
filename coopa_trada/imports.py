@@ -19,7 +19,12 @@ COLUMNS = ["SYMBOL", "OPTION", "LAST PRICE", "TVT-DELTA", "SCHWAB DELTA"]
 
 
 NOT_MAC_MESSAGE = ("Reading a picture of the picks table only works on a Mac (it uses Apple's "
-                   "built-in text recognition). On this computer, upload the CSV file instead.")
+                   "built-in text recognition) or with the Claude picture reader, which needs "
+                   "ANTHROPIC_API_KEY in the .env file. On this computer, upload the CSV file instead.")
+CLAUDE_KEY_MESSAGE = ("The Claude picture reader is selected but ANTHROPIC_API_KEY is not in the .env "
+                      "file. Add it, or upload the CSV file instead.")
+# COOPA_IMAGE_READER in .env: auto (default), claude, or apple.
+READER_CHOICES = ("auto", "claude", "apple")
 NO_READER_MESSAGE = ("The picture reader is missing from this copy of Coopa Trada. Upload the CSV "
                      "file instead, or reinstall the app.")
 
@@ -46,13 +51,51 @@ def image_reader_command() -> list[str] | None:
     return None
 
 
+def image_reader() -> tuple[str | None, str | None]:
+    """(reader, reason): which picture reader to use here, or (None, why not).
+
+    ``COOPA_IMAGE_READER=auto`` (default): Apple Vision on a Mac that has it,
+    otherwise the Claude reader when ANTHROPIC_API_KEY is set. ``claude`` or
+    ``apple`` force one (Apple only exists on a Mac).
+    """
+    from .vision import claude_configured
+    choice = (os.environ.get("COOPA_IMAGE_READER") or "auto").strip().lower()
+    if choice not in READER_CHOICES:
+        choice = "auto"
+    apple = image_reader_command() is not None
+    if choice == "apple" or (choice == "auto" and apple):
+        if apple:
+            return "apple", None
+        return None, NOT_MAC_MESSAGE if platform.system() != "Darwin" else NO_READER_MESSAGE
+    if claude_configured():
+        return "claude", None
+    if choice == "claude":
+        return None, CLAUDE_KEY_MESSAGE
+    return None, NOT_MAC_MESSAGE if platform.system() != "Darwin" else NO_READER_MESSAGE
+
+
 def image_reader_status() -> dict:
-    available = image_reader_command() is not None
-    reason = None if available else (NOT_MAC_MESSAGE if platform.system() != "Darwin" else NO_READER_MESSAGE)
-    return {"available": available, "reason": reason}
+    reader, reason = image_reader()
+    return {"available": reader is not None, "reason": reason, "reader": reader}
+
+
+def read_image(path: Path):
+    """Read a picks picture with the selected reader. Returns a vision.ReadResult."""
+    from .vision import ReadResult, read_picks_image
+    reader, reason = image_reader()
+    if reader is None:
+        raise ValueError(reason)
+    if reader == "claude":
+        return read_picks_image(path)
+    text = _recognize_apple(path)
+    return ReadResult(text, None, None, None)
 
 
 def recognize_image(path: Path) -> str:
+    return read_image(path).csv
+
+
+def _recognize_apple(path: Path) -> str:
     command = image_reader_command()
     if command is None:
         raise ValueError(image_reader_status()["reason"])
