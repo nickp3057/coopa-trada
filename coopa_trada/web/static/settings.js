@@ -17,7 +17,8 @@ const PCT_OR_INT_FIELDS = [
   "cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct",
   "profit_trail_points",
 ];
-const TEXT_FIELDS = ["profit_trail_arm"];
+const TEXT_FIELDS = ["profit_trail_arm", "held_exit_start"];
+const BOOL_FIELDS = ["stops_on_entry_day"];
 const DELTA_NUMBERS = ["min_abs_delta", "max_abs_delta"];
 
 let saved = null; // last response from the server
@@ -73,6 +74,11 @@ function fill(data) {
   for (const name of TEXT_FIELDS) {
     if (form.elements[name] && data[name] != null) form.elements[name].value = data[name];
   }
+  for (const name of BOOL_FIELDS) {
+    if (form.elements[name]) form.elements[name].checked = !!data[name];
+  }
+  const holdNote = document.getElementById("hold-note");
+  if (holdNote) holdNote.textContent = data.hold_note || "";
   const trailNote = document.getElementById("profit-trail-note");
   if (trailNote) trailNote.textContent = data.profit_trail_note || "";
   renderExitWindow(data.exit_window || {});
@@ -89,6 +95,9 @@ function collect() {
   }
   for (const name of TEXT_FIELDS) {
     if (form.elements[name]) payload[name] = form.elements[name].value;
+  }
+  for (const name of BOOL_FIELDS) {
+    if (form.elements[name]) payload[name] = form.elements[name].checked;
   }
   const ew = {};
   ewRows.querySelectorAll("input[data-ew]").forEach((inp) => {

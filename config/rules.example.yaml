@@ -43,6 +43,18 @@ cooper_drop_from_entry_pct:        # blank = not wired
 profit_trail_points: 10
 profit_trail_arm: from_entry
 
+# Hold logic (Cooper, 2026-10): if the take-profit is reached on the day of
+# entry, sell that day; otherwise hold and roll to the next trading day, where
+# every exit applies and anything still open is sold at the end of that day's
+# exit window. An option expiring on its entry day is sold that day.
+# stops_on_entry_day: true = the stop-type exits (hard stop, trailing stops,
+#   profit-point trail) also protect a position on the day it is bought.
+# held_exit_start: when held positions start being watched the next day:
+#   open | "HH:MM" (New York) | minutes before the close.
+# NEW SETTINGS, NOT CONFIRMED BY COOPER.
+stops_on_entry_day: true
+held_exit_start: open
+
 # Risk caps.
 max_concurrent_positions: 5
 # Spending cap per pick. Always buys exactly 1 contract; if that contract
@@ -80,4 +92,8 @@ setting_confirmations:
   delta_filter:
     confirmed_by_cooper: false
   profit_point_trail:
+    confirmed_by_cooper: false
+  entry_day_stops:
+    confirmed_by_cooper: false
+  next_day_exits:
     confirmed_by_cooper: false

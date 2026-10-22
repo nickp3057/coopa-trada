@@ -173,9 +173,11 @@ def test_delayed_entry_is_monitored_through_exit_fill(store):
         now[0] += timedelta(seconds=_seconds)
         assert now[0].hour < 20, "engine failed to finish before close"
     eng = engine(store, live, now=lambda: now[0], sleep=sleep)
-    # Keep price steady until the hard exit deadline.
+    # Cooper's hold rule: only a take-profit sells on the entry day. The price
+    # reaches it once the delayed entry has filled, so the exit happens today.
     contract = eng.resolver.resolve(signal())
-    eng.quote_source = lambda _: Quote(contract.bid, contract.ask, contract.mid)
+    up = round(contract.ask * 1.7, 2)
+    eng.quote_source = lambda _: Quote(up - .01, up + .01, up)
     eng.run(DAY)
     assert len(client.submitted) == 2
     assert client.submitted[1]["orderLegCollection"][0]["instruction"] == "SELL_TO_CLOSE"

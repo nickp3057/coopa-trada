@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time as _time
 from contextlib import ExitStack
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from typing import Callable
 
@@ -85,6 +85,17 @@ class ReconcileReport:
     simulated: bool = False
 
 
+@dataclass
+class ExitPlan:
+    """How one open position is managed on the run's day (see Engine._exit_plan)."""
+    kind: str               # "entry_day" | "held" | "overdue"
+    start: datetime         # exits are evaluated from here
+    end: datetime           # the asset class's exit-window end today
+    hard_exit_at: datetime  # when HardTimeExit fires, if it applies
+    composite: CompositeExit
+    held_overnight: bool    # True: may stay open past today's window
+
+
 class Engine:
     def __init__(
         self,
@@ -137,6 +148,7 @@ class Engine:
             TrailingPeak(rules.trailing_stop_pct),
             HardTimeExit(),
         ]
+        # Every exit: positions held from an earlier day.
         self.composite = CompositeExit(strategies)
 
     # -- reconcile (hard rule 5) --------------------------------
@@ -267,7 +279,8 @@ class Engine:
         entry_time = self.cal.entry_at(day, self.rules.entry_minutes_before_close)
         self.log.info("entry scheduled for %s", clock.to_market(entry_time).isoformat())
         if not once:
-            self._wait_until(entry_time)
+            # Positions held from an earlier day are managed while waiting.
+            self._wait_until(entry_time, day)
             # The login may have aged past the hold while waiting for entry time.
             self._check_schwab_token(day)
 
@@ -364,42 +377,79 @@ class Engine:
 
     # -- exit -----------------------------------------------
     def _positions_state(self, day: date) -> list[tuple[PositionState, str]]:
-        out: list[tuple[PositionState, str]] = []
+        return [(state, signal_id) for state, signal_id, _ in self._managed_positions(day)]
+
+    def _managed_positions(self, day: date) -> list[tuple[PositionState, str, "ExitPlan"]]:
+        out = []
         sig_meta = {}
         for row in self.store.open_positions(self.mode.value):
-            asset_class = self._asset_class_for(row["signal_id"], sig_meta)
-            _, end = self.cal.exit_window(day, asset_class, self.rules)
+            asset_class, expiration = self._signal_meta(row["signal_id"], sig_meta)
             entry_price = float(row["entry_price"])
+            entry_at = clock.parse_iso(row["entry_at_utc"])
+            entry_day = (date.fromisoformat(row["trading_day"]) if row["trading_day"]
+                         else clock.to_market(entry_at).date())
+            plan = self._exit_plan(day, asset_class, entry_day, expiration)
             state = PositionState(
                 osi_symbol=row["osi_symbol"],
                 entry_price=entry_price,
-                entry_at=clock.parse_iso(row["entry_at_utc"]),
+                entry_at=entry_at,
                 quantity=int(row["quantity"]),
                 session_peak_mid=max(entry_price, float(row["peak_mid"])),
                 asset_class=asset_class,
-                hard_exit_at=end,
+                hard_exit_at=plan.hard_exit_at,
                 entry_order_id=row["order_id"],
             )
-            out.append((state, row["signal_id"]))
+            out.append((state, row["signal_id"], plan))
         return out
 
-    def _asset_class_for(self, signal_id: str, cache: dict):
+    def _exit_plan(self, day: date, asset_class, entry_day: date, expiration: date | None) -> "ExitPlan":
+        """Which exits apply to a position today, and from when.
+
+        Cooper's hold rule: on the day of entry only the take-profit (plus the
+        stop-type exits when ``stops_on_entry_day``) can sell; otherwise the
+        position is held and rolls to the next trading day, where every exit
+        applies from ``held_exit_start`` and the time exit sells at that day's
+        exit-window end. An option expiring on its entry day cannot be held,
+        so the time exit applies then too. A position still open after its
+        planned next-day exit is overdue and is sold from the start of today's
+        monitoring.
+        """
+        start, end = self.cal.exit_window(day, asset_class, self.rules)
+        if entry_day >= day:
+            expires_today = expiration is not None and expiration <= day
+            keep = [s for s in self.composite.strategies
+                    if isinstance(s, TakeProfit)
+                    or (isinstance(s, HardTimeExit) and expires_today)
+                    or (self.rules.stops_on_entry_day and not isinstance(s, (TakeProfit, HardTimeExit)))]
+            return ExitPlan("entry_day", start, end, end, CompositeExit(keep), held_overnight=not expires_today)
+        held_start = min(max(self.cal.resolve_time(day, self.rules.held_exit_start),
+                             self.cal.session_open(day)), end)
+        planned = self.cal.next_session(entry_day)
+        if day > planned:
+            return ExitPlan("overdue", held_start, end, held_start, self.composite, held_overnight=False)
+        return ExitPlan("held", held_start, end, end, self.composite, held_overnight=False)
+
+    def _signal_meta(self, signal_id: str, cache: dict):
         from .models import AssetClass
 
         if signal_id in cache:
             return cache[signal_id]
         row = self.store.conn.execute(
-            "SELECT asset_class FROM signals WHERE id = ?", (signal_id,)
+            "SELECT asset_class, expiration FROM signals WHERE id = ?", (signal_id,)
         ).fetchone()
         ac = AssetClass[row["asset_class"]] if row else AssetClass.SINGLE_NAME
-        cache[signal_id] = ac
-        return ac
+        exp = date.fromisoformat(row["expiration"]) if row and row["expiration"] else None
+        cache[signal_id] = (ac, exp)
+        return cache[signal_id]
+
+    def _asset_class_for(self, signal_id: str, cache: dict):
+        return self._signal_meta(signal_id, cache)[0]
 
     def _exit_tick(self, day: date) -> int:
         self._sync_orders()
         acted = 0
         halted = self.store.halted_symbols(self.mode.value)
-        for state, signal_id in self._positions_state(day):
+        for state, signal_id, plan in self._managed_positions(day):
             self._check_exit_order(state, signal_id)
             if state.osi_symbol in halted:
                 self.log.warning("hold %s: halted until a person resolves an unknown order", state.osi_symbol)
@@ -408,10 +458,9 @@ class Engine:
             update_peak(state, quote)
             self.store.update_peak(state.entry_order_id, state.session_peak_mid)
             now = clock.to_market(self._now())
-            start, _ = self.cal.exit_window(day, state.asset_class, self.rules)
-            if now < start:
+            if now < plan.start:
                 continue
-            decision = self.composite.check(state, quote, now)
+            decision = plan.composite.check(state, quote, now)
             if decision is None:
                 continue
             try:
@@ -494,6 +543,10 @@ class Engine:
             if not positions and not pending:
                 self.log.info("all positions closed and orders settled")
                 return
+            if not pending and self._only_overnight_holds(day):
+                self.log.info("holding %d position(s) to the next trading day (take-profit not reached)",
+                              len(positions))
+                return
             if self.mode is Mode.LIVE:
                 for order in pending:
                     if order["intent"] != "ENTRY" or order["status"] == "UNKNOWN":
@@ -506,16 +559,27 @@ class Engine:
                 raise RuntimeError("Market closed with unsettled orders or positions; check Schwab before restarting")
             self._sleep(self.rules.poll_interval_seconds)
 
+    def _only_overnight_holds(self, day: date) -> bool:
+        """Every open position was bought today, may be held overnight, and
+        today's exit window for it is over."""
+        now = self._now()
+        managed = self._managed_positions(day)
+        return bool(managed) and all(plan.held_overnight and now >= plan.end for _, _, plan in managed)
+
     # -- helpers --------------------------------------------
     def _quote(self, osi_symbol: str) -> Quote:
         if self.quote_source is None:
             raise RuntimeError("engine has no quote_source; cannot run the exit loop")
         return self.quote_source(osi_symbol)
 
-    def _wait_until(self, target: datetime) -> None:
+    def _wait_until(self, target: datetime, day: date | None = None) -> None:
         target = clock.ensure_aware(target)
         while True:
             remaining = (target - self._now()).total_seconds()
             if remaining <= 0:
                 return
+            if day is not None and (self.store.open_positions(self.mode.value)
+                                    or self.store.orders_open(self.mode.value)):
+                self.phase = "trading"
+                self._exit_tick(day)
             self._sleep(min(remaining, max(self.rules.poll_interval_seconds, 1)))

@@ -158,8 +158,10 @@ class Watchdog:
         n = len(open_live)
         self.alerter.alert("crash_recovery", "Positions open with nothing watching them",
                            f"{n} real position{'s are' if n != 1 else ' is'} open but no run is "
-                           f"managing {'them' if n != 1 else 'it'}. Decide what to do: check "
-                           f"Schwab, then start a run or sell there.", key="leftovers")
+                           f"managing {'them' if n != 1 else 'it'}. Positions held overnight on "
+                           f"purpose still need the next trading day's run started (before the "
+                           f"open) so their exits are watched. Otherwise check Schwab, then start "
+                           f"a run or sell there.", key="leftovers")
 
     def _check_incidents(self, now: datetime) -> None:
         incidents = self._with_store(lambda s: s.open_incidents())

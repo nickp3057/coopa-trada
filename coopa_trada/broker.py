@@ -135,6 +135,7 @@ class _BrokerBase:
                 status="PENDING",
                 request=request,
                 entry_order_id=entry_order_id,
+                trading_day=day,
             )
 
         submitted_at = clock.now_utc()

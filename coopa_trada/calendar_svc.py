@@ -80,6 +80,13 @@ class CalendarService:
             raise ValueError(f"exit window for {asset_class} ends before it starts")
         return start, end
 
+    def resolve_time(self, d: date, endpoint) -> datetime:
+        """``"open"`` (session open), a ``time`` (New York wall clock) or an ``int``
+        (minutes before the close), on session ``d``."""
+        if endpoint == "open":
+            return self.session_open(d)
+        return self._resolve_endpoint(d, endpoint, self.session_close(d))
+
     # -- holding period ---------------------------------------------------
     def next_session(self, d: date) -> date:
         """The first trading day strictly after ``d`` (skips weekends and holidays)."""

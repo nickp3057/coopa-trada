@@ -39,6 +39,8 @@ PROFIT_TRAIL_NOTE = (
 OPTIONAL_DEFAULTS = {
     "profit_trail_points": 10.0,
     "profit_trail_arm": "from_entry",
+    "stops_on_entry_day": True,
+    "held_exit_start": "open",
 }
 # Which rule keys each confirmation marker covers.
 CONFIRMATION_KEYS = {
@@ -46,7 +48,17 @@ CONFIRMATION_KEYS = {
     "ten_percent_stop": STOP_KEYS,
     "delta_filter": ("delta_filter",),
     "profit_point_trail": ("profit_trail_points", "profit_trail_arm"),
+    "entry_day_stops": ("stops_on_entry_day",),
+    "next_day_exits": ("held_exit_start",),
 }
+HOLD_NOTE = (
+    "Cooper's hold rule: if the take-profit is reached on the day of entry, sell that day; "
+    "otherwise hold and roll to the next trading day, where every exit applies and anything "
+    "still open is sold at the end of that day's exit window. 'Stops on the day of entry' "
+    "decides whether the stop-type exits (hard stop, trailing stops, profit-point trail) also "
+    "protect a position on the day it was bought. 'Next-day exits start' is when held "
+    "positions start being watched: open, a New York HH:MM time, or minutes before the close."
+)
 SPENDING_COMMENT = """# Spending cap per pick. Always buys exactly 1 contract; if that contract
 # costs more than this, the ticker is skipped entirely.
 # DEFAULT, NOT CONFIRMED BY COOPER -- $300 is a number he mentioned once and
@@ -89,6 +101,15 @@ def _describe(key: str, values: dict) -> str:
     if key == "ten_percent_stop":
         return (f"drop from peak {_pct_text(values.get('cooper_drop_from_peak_pct'))}, "
                 f"drop from entry {_pct_text(values.get('cooper_drop_from_entry_pct'))}")
+    if key == "entry_day_stops":
+        on = values.get("stops_on_entry_day", True)
+        return ("yes: stops also protect a position on the day it is bought" if on
+                else "no: only the take-profit can sell on the day of entry")
+    if key == "next_day_exits":
+        start = values.get("held_exit_start", "open")
+        return ("from the market open" if start == "open" else
+                f"from {start} New York time" if isinstance(start, str) else
+                f"from {start} minutes before the close")
     if key == "profit_point_trail":
         points = values.get("profit_trail_points", OPTIONAL_DEFAULTS["profit_trail_points"])
         if points in (None, ""):
@@ -136,7 +157,7 @@ def read_rules_dict(config_path) -> dict:
         setting_confirmations=markers,
         default_settings=metadata,
         stop_keys=list(STOP_KEYS), default_stop_note=DEFAULT_STOP_NOTE,
-        profit_trail_note=PROFIT_TRAIL_NOTE,
+        profit_trail_note=PROFIT_TRAIL_NOTE, hold_note=HOLD_NOTE,
         warning=warning, path=str(path),
     )
     return out
@@ -173,6 +194,12 @@ def _coerce_payload(payload: dict) -> dict:
     except (TypeError, ValueError):
         raise RulesValidationError("profit_trail_points must be a number or blank") from None
     out["profit_trail_arm"] = payload.get("profit_trail_arm", OPTIONAL_DEFAULTS["profit_trail_arm"])
+    stops = payload.get("stops_on_entry_day", OPTIONAL_DEFAULTS["stops_on_entry_day"])
+    if type(stops) is not bool:
+        raise RulesValidationError("stops_on_entry_day must be true or false")
+    out["stops_on_entry_day"] = stops
+    start = payload.get("held_exit_start", OPTIONAL_DEFAULTS["held_exit_start"])
+    out["held_exit_start"] = "open" if str(start).strip().lower() in ("", "open", "none") else _endpoint(start)
     try:
         out["delta_filter"] = asdict(DeltaFilter.from_config(payload.get("delta_filter")))
     except (ValueError, TypeError) as exc:
@@ -206,7 +233,7 @@ def _covered_values(raw: dict, key: str):
             out.append(asdict(DeltaFilter.from_config(value)))
         elif name in OPTIONAL_DEFAULTS:
             value = raw.get(name, OPTIONAL_DEFAULTS[name])
-            out.append(value if isinstance(value, str) or value is None else float(value))
+            out.append(value if isinstance(value, (str, bool)) or value is None else float(value))
         else:
             out.append(None if value in (None, "") else float(value))
     return out

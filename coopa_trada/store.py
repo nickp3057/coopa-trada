@@ -148,6 +148,10 @@ class Store:
 
         with self.transaction():
             columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(orders)")}
+            if "trading_day" not in columns:
+                # The session an order was placed for. Decides whether a position is on its
+                # entry day or held from an earlier day. Legacy rows fall back to the fill date.
+                self.conn.execute("ALTER TABLE orders ADD COLUMN trading_day TEXT")
             if "entry_order_id" not in columns:
                 self.conn.execute("ALTER TABLE orders ADD COLUMN entry_order_id INTEGER REFERENCES orders(id)")
                 # Legacy logs had no entry link. Associate each exit with its most
@@ -220,6 +224,7 @@ class Store:
         request: Any,
         created_at: datetime | None = None,
         entry_order_id: int | None = None,
+        trading_day=None,
     ) -> int:
         """Insert a PENDING (or given-status) order row with its request JSON.
 
@@ -242,8 +247,9 @@ class Store:
                 """
                 INSERT INTO orders
                     (signal_id, intent, idempotency_key, mode, osi_symbol, side,
-                     quantity, limit_price, status, created_at_utc, request_json, entry_order_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     quantity, limit_price, status, created_at_utc, request_json, entry_order_id,
+                     trading_day)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     signal_id,
@@ -258,6 +264,7 @@ class Store:
                     created,
                     _json(request),
                     entry_order_id,
+                    trading_day.isoformat() if hasattr(trading_day, "isoformat") else trading_day,
                 ),
             )
             return int(cur.lastrowid)
@@ -395,6 +402,7 @@ class Store:
             )
             SELECT * FROM (SELECT o.id AS order_id, o.signal_id, o.osi_symbol, o.mode,
                    o.limit_price, f.price AS entry_price, f.at_utc AS entry_at_utc,
+                   o.trading_day AS trading_day,
                    f.qty - COALESCE((
                        SELECT SUM(xf.qty) FROM orders xo JOIN totals xf ON xf.order_id = xo.id
                        WHERE xo.intent = 'EXIT' AND xo.entry_order_id = o.id AND xo.mode = o.mode

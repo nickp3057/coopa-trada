@@ -70,6 +70,24 @@
       </label>
     </fieldset>
 
+    <fieldset class="warn-fieldset">
+      <legend>Hold logic (take-profit sells today, otherwise hold to the next trading day)</legend>
+      <p class="hint" id="hold-note"></p>
+      <div class="confirm-row" data-confirm-key="entry_day_stops">
+        <span class="badge badge-warn" data-badge>Unconfirmed</span>
+        <label class="inline"><input type="checkbox" name="confirm_entry_day_stops"> Confirmed with Cooper</label>
+      </div>
+      <label class="inline"><input type="checkbox" name="stops_on_entry_day">
+        Stops also protect a position on the day it is bought</label>
+      <div class="confirm-row" data-confirm-key="next_day_exits">
+        <span class="badge badge-warn" data-badge>Unconfirmed</span>
+        <label class="inline"><input type="checkbox" name="confirm_next_day_exits"> Confirmed with Cooper</label>
+      </div>
+      <label class="block">Next-day exits start (<code>open</code>, New York <code>HH:MM</code>, or minutes before close)
+        <input name="held_exit_start" type="text">
+      </label>
+    </fieldset>
+
     <fieldset>
       <legend>Risk caps</legend>
       <label class="block">Max concurrent positions

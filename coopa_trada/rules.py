@@ -29,6 +29,8 @@ SETTING_LABELS = {
     "ten_percent_stop": "10% stop basis",
     "delta_filter": "delta filter",
     "profit_point_trail": "profit-point trailing exit",
+    "entry_day_stops": "stops on the day of entry",
+    "next_day_exits": "next-day exit start",
 }
 
 
@@ -120,6 +122,14 @@ class Rules:
     # profit % (None = off). See exits.ProfitPointTrail.
     profit_trail_points: float | None = 10.0
     profit_trail_arm: str = "from_entry"
+    # Hold logic (Cooper): take-profit sells the same day; otherwise the position
+    # is held and every exit applies on the next trading day.
+    # True: stop-type exits (hard stop, trailing stops, profit-point trail) also
+    # protect the position on the day it was bought.
+    stops_on_entry_day: bool = True
+    # When held positions start being watched on the next trading day:
+    # "open" (the session open), a New York HH:MM time, or minutes before the close.
+    held_exit_start: object = "open"
 
     def live_block_reason(self) -> str | None:
         """Why a live run must not start, or None. Dry runs ignore this."""
@@ -249,7 +259,28 @@ def load_rules(path: str | Path) -> Rules:
     if trail_arm not in PROFIT_TRAIL_ARMS:
         raise ValueError(f"profit_trail_arm must be one of: {', '.join(PROFIT_TRAIL_ARMS)}")
 
+    stops_today = data.get("stops_on_entry_day", True)
+    if type(stops_today) is not bool:
+        raise ValueError("stops_on_entry_day must be true or false")
+    held_start = data.get("held_exit_start", "open")
+    if not (isinstance(held_start, str) and held_start.strip().lower() == "open"):
+        try:
+            held_start = _coerce_endpoint(held_start)
+            # An unquoted 14:00 in YAML reads as the number 840 (base 60); a full
+            # session is 390 minutes, so larger numbers are refused, not guessed at.
+            if isinstance(held_start, time) and not time(4) <= held_start <= time(20):
+                raise ValueError
+            if isinstance(held_start, int) and held_start > 390:
+                raise ValueError
+        except (ValueError, TypeError):
+            raise ValueError('held_exit_start must be "open", a New York HH:MM time, '
+                             "or whole minutes before the close") from None
+    else:
+        held_start = "open"
+
     return Rules(
+        stops_on_entry_day=stops_today,
+        held_exit_start=held_start,
         profit_trail_points=trail_points,
         profit_trail_arm=trail_arm,
         delta_filter=DeltaFilter.from_config(data.get("delta_filter")),
