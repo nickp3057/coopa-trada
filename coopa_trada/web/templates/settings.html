@@ -88,10 +88,26 @@
       </label>
     </fieldset>
 
-    <fieldset>
-      <legend>Risk caps</legend>
-      <label class="block">Max concurrent positions
-        <input name="max_concurrent_positions" type="number" min="1" step="1" required>
+    <fieldset class="warn-fieldset">
+      <legend>Total budget and ranking</legend>
+      <div class="confirm-row" data-confirm-key="total_budget">
+        <span class="badge badge-warn" data-badge>Unconfirmed</span>
+        <label class="inline"><input type="checkbox" name="confirm_total_budget"> Confirmed with Cooper</label>
+      </div>
+      <label class="block">Total budget: the most all open positions together may cost ($, at ask &times; 100)
+        <input name="total_budget" type="number" min="0.01" step="0.01" required>
+      </label>
+      <p class="hint">Includes positions held from earlier days and buy orders still working.
+        There is no limit on the number of positions.</p>
+      <div class="confirm-row" data-confirm-key="delta_ranking">
+        <span class="badge badge-warn" data-badge>Unconfirmed</span>
+        <label class="inline"><input type="checkbox" name="confirm_delta_ranking"> Confirmed with Cooper</label>
+      </div>
+      <label class="block">Rank picks by (highest |delta| bought first)
+        <select name="rank_delta_source">
+          <option value="schwab_live">Schwab&rsquo;s live delta at buying time</option>
+          <option value="tvt">TVT delta from the pick list</option>
+        </select>
       </label>
     </fieldset>
 

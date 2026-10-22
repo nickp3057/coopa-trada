@@ -55,12 +55,19 @@ profit_trail_arm: from_entry
 stops_on_entry_day: true
 held_exit_start: open
 
-# Risk caps.
-max_concurrent_positions: 5
-# Spending cap per pick. Always buys exactly 1 contract; if that contract
-# costs more than this, the ticker is skipped entirely.
-# DEFAULT, NOT CONFIRMED BY COOPER -- $300 is a number he mentioned once and
-# never confirmed. Adjust freely.
+# Cooper: $300 is the TOTAL budget (raise it later if trading is profitable):
+# the most all open positions together may cost, including ones held from
+# earlier days and buy orders still working, checked at ask x 100. There is no
+# limit on the number of positions. Picks are ranked by |delta| (highest first)
+# and bought in that order while each still fits; a pick that does not fit is
+# skipped and logged, and cheaper picks after it are still considered.
+# rank_delta_source: schwab_live (Schwab's option chain at buying time) or tvt
+# (the list's TVT-DELTA column). NEW SETTINGS, NOT CONFIRMED BY COOPER.
+total_budget: 300
+rank_delta_source: schwab_live
+
+# Spending cap per pick (Cooper: also $300). Always buys exactly 1 contract; if
+# that contract costs more than this, the ticker is skipped entirely.
 max_dollars_per_position: 300
 
 # Exit loop cadence.
@@ -96,4 +103,8 @@ setting_confirmations:
   entry_day_stops:
     confirmed_by_cooper: false
   next_day_exits:
+    confirmed_by_cooper: false
+  total_budget:
+    confirmed_by_cooper: false
+  delta_ranking:
     confirmed_by_cooper: false

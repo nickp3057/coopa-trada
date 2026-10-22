@@ -41,6 +41,8 @@ OPTIONAL_DEFAULTS = {
     "profit_trail_arm": "from_entry",
     "stops_on_entry_day": True,
     "held_exit_start": "open",
+    "total_budget": 300.0,
+    "rank_delta_source": "schwab_live",
 }
 # Which rule keys each confirmation marker covers.
 CONFIRMATION_KEYS = {
@@ -50,6 +52,8 @@ CONFIRMATION_KEYS = {
     "profit_point_trail": ("profit_trail_points", "profit_trail_arm"),
     "entry_day_stops": ("stops_on_entry_day",),
     "next_day_exits": ("held_exit_start",),
+    "total_budget": ("total_budget",),
+    "delta_ranking": ("rank_delta_source",),
 }
 HOLD_NOTE = (
     "Cooper's hold rule: if the take-profit is reached on the day of entry, sell that day; "
@@ -59,10 +63,17 @@ HOLD_NOTE = (
     "protect a position on the day it was bought. 'Next-day exits start' is when held "
     "positions start being watched: open, a New York HH:MM time, or minutes before the close."
 )
+BUDGET_COMMENT = """# Cooper: $300 is the TOTAL budget (raise it later if trading is profitable):
+# the most all open positions together may cost, including ones held from
+# earlier days and buy orders still working, checked at ask x 100. There is no
+# limit on the number of positions. Picks are ranked by |delta| (highest
+# first; rank_delta_source: schwab_live = Schwab's live chain, tvt = the list's
+# TVT-DELTA column) and bought in that order while each still fits.
+# NEW SETTINGS, NOT CONFIRMED BY COOPER.
+"""
 SPENDING_COMMENT = """# Spending cap per pick. Always buys exactly 1 contract; if that contract
 # costs more than this, the ticker is skipped entirely.
-# DEFAULT, NOT CONFIRMED BY COOPER -- $300 is a number he mentioned once and
-# never confirmed. Adjust freely.
+# Cooper answered $300 per pick (2026-10); tick it as confirmed in Settings.
 """
 DELTA_COMMENT = """# Delta filtering. Off by default -- we assume Cooper's source already screens
 # on delta and sends only the picks it wants traded.
@@ -75,7 +86,7 @@ DELTA_COMMENT = """# Delta filtering. Off by default -- we assume Cooper's sourc
 _REQUIRED_NUMERIC = {
     "entry_minutes_before_close": int, "trailing_stop_pct": float,
     "hard_stop_loss_pct": float, "take_profit_pct": float,
-    "max_concurrent_positions": int, "max_dollars_per_position": float,
+    "max_dollars_per_position": float,
     "poll_interval_seconds": int,
 }
 
@@ -101,6 +112,13 @@ def _describe(key: str, values: dict) -> str:
     if key == "ten_percent_stop":
         return (f"drop from peak {_pct_text(values.get('cooper_drop_from_peak_pct'))}, "
                 f"drop from entry {_pct_text(values.get('cooper_drop_from_entry_pct'))}")
+    if key == "total_budget":
+        budget = values.get("total_budget", OPTIONAL_DEFAULTS["total_budget"])
+        return f"${float(budget):g} for all open positions together, checked against ask × 100"
+    if key == "delta_ranking":
+        src = values.get("rank_delta_source", OPTIONAL_DEFAULTS["rank_delta_source"])
+        return ("Schwab's live delta at buying time" if src == "schwab_live"
+                else "TVT delta from the pick list")
     if key == "entry_day_stops":
         on = values.get("stops_on_entry_day", True)
         return ("yes: stops also protect a position on the day it is bought" if on
@@ -194,6 +212,11 @@ def _coerce_payload(payload: dict) -> dict:
     except (TypeError, ValueError):
         raise RulesValidationError("profit_trail_points must be a number or blank") from None
     out["profit_trail_arm"] = payload.get("profit_trail_arm", OPTIONAL_DEFAULTS["profit_trail_arm"])
+    try:
+        out["total_budget"] = float(payload.get("total_budget", OPTIONAL_DEFAULTS["total_budget"]))
+    except (TypeError, ValueError):
+        raise RulesValidationError("total_budget must be a number") from None
+    out["rank_delta_source"] = payload.get("rank_delta_source", OPTIONAL_DEFAULTS["rank_delta_source"])
     stops = payload.get("stops_on_entry_day", OPTIONAL_DEFAULTS["stops_on_entry_day"])
     if type(stops) is not bool:
         raise RulesValidationError("stops_on_entry_day must be true or false")
@@ -211,6 +234,7 @@ def _render_yaml(body: dict) -> str:
     comments = {
         "cooper_drop_from_peak_pct": "\n".join("# " + line for line in [DEFAULT_STOP_NOTE]) + "\n",
         "max_dollars_per_position": SPENDING_COMMENT,
+        "total_budget": BUDGET_COMMENT,
         "profit_trail_points": "\n".join("# " + line for line in [PROFIT_TRAIL_NOTE]) + "\n"
                                "# NEW SETTING, NOT CONFIRMED BY COOPER (arm default: from_entry).\n",
         "delta_filter": DELTA_COMMENT,

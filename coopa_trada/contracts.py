@@ -46,6 +46,18 @@ class ResolvedContract:
     open_interest: int
     tradable: bool
     resolved_at: datetime
+    # Schwab's live delta from the option chain; None when missing or invalid.
+    delta: float | None = None
+
+
+def _valid_delta(value) -> float | None:
+    """Schwab sends -999 (or nothing) when it has no delta."""
+    import math
+    try:
+        d = float(value)
+    except (TypeError, ValueError):
+        return None
+    return d if math.isfinite(d) and abs(d) <= 1 else None
 
 
 class ContractUnderspecified(Exception):
@@ -123,6 +135,7 @@ class ContractResolver:
             open_interest=int(raw.get("openInterest") or 0),
             tradable=True,
             resolved_at=clock.now_utc(),
+            delta=_valid_delta(raw.get("delta")),
         )
 
     @staticmethod
@@ -183,4 +196,6 @@ class SyntheticResolver:
             open_interest=self.open_interest,
             tradable=True,
             resolved_at=clock.now_utc(),
+            # Simulation has no live chain: the list's SCHWAB DELTA column stands in.
+            delta=_valid_delta(signal.signal_delta_schwab),
         )

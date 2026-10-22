@@ -7,6 +7,7 @@ engine itself holds no market-time literals.
 
 from __future__ import annotations
 
+import math
 import time as _time
 from contextlib import ExitStack
 from dataclasses import dataclass, field, replace
@@ -298,8 +299,20 @@ class Engine:
 
     # -- entry ----------------------------------------------
     def _entry_pass(self, day: date) -> None:
+        """Buy today's picks, highest delta first, while each fits the budget.
+
+        Every pick goes through the same gates as before (expiration, exit
+        deadline, delta filter, already held, resolvable, per-pick cap, halted
+        contract). The survivors are ranked by |delta| (``rank_delta_source``;
+        picks without one go last, in list order) and bought in that order while
+        each one's cost at ask x 100 fits what is left of ``total_budget`` after
+        every open position and working buy order. A pick that does not fit is
+        skipped (and logged); cheaper picks after it are still considered.
+        Every skip is recorded with its reason.
+        """
         signals = self.source.fetch(day)
         self.log.info("fetched %d signal(s) for %s", len(signals), day.isoformat())
+        candidates = []
         for signal in signals:
             if signal.expiration is None or signal.expiration < day:
                 self.log.warning("skip %s: expired or missing expiration", signal.id)
@@ -318,41 +331,48 @@ class Engine:
                     "max_abs_delta": self.rules.delta_filter.max_abs_delta,
                 })
                 continue
+            positions = self.store.open_positions(self.mode.value)
+            pending = [r for r in self.store.orders_open(self.mode.value) if r["intent"] == "ENTRY"]
+            if signal.id in {r["signal_id"] for r in positions} | {r["signal_id"] for r in pending}:
+                continue  # already bought or being bought
             try:
                 contract = self.resolver.resolve(signal)
             except ContractUnderspecified as exc:
-                self.log.warning("skip %s: underspecified (%s)", signal.id, exc)
+                self._record_skip(signal, day, "underspecified", f"underspecified ({exc})", {})
                 continue
             except ContractNotTradable as exc:
-                self.log.warning("skip %s: not tradable (%s)", signal.id, exc)
+                self._record_skip(signal, day, "not_tradable", f"not tradable ({exc})", {})
                 continue
 
-            mid = contract.mid
             # Fixed quantity per pick (1). FixedQuantitySizer returns 0 when that
             # pick's cost at the ask would exceed max_dollars_per_position -- skip it.
             qty = self.sizer.size(signal, contract, self.rules)
             if qty <= 0:
                 self._record_skip(signal, day, "spending_cap",
                     f"1 contract exceeds spending cap (ask={contract.ask:.4f}, cap={self.rules.max_dollars_per_position:.2f})",
-                    {"ask": contract.ask, "mid": mid, "cap": self.rules.max_dollars_per_position})
+                    {"ask": contract.ask, "mid": contract.mid, "cap": self.rules.max_dollars_per_position})
                 continue
-
-            positions = self.store.open_positions(self.mode.value)
-            pending = [r for r in self.store.orders_open(self.mode.value) if r["intent"] == "ENTRY"]
-            reserved = {r["signal_id"] for r in positions} | {r["signal_id"] for r in pending}
-            if signal.id in reserved:
-                continue
-            open_count = len(reserved)
-            if open_count >= self.rules.max_concurrent_positions:
-                self.log.warning(
-                    "skip %s: at max concurrent positions (%d)", signal.id, self.rules.max_concurrent_positions
-                )
-                continue
-
             if contract.osi_symbol in self.store.halted_symbols(self.mode.value):
                 self._record_skip(signal, day, "halted",
                     f"{contract.osi_symbol} is halted: an earlier order's outcome is unknown",
                     {"osi_symbol": contract.osi_symbol})
+                continue
+            candidates.append((signal, contract, qty, self._rank_delta(signal, contract)))
+
+        # Highest |delta| first; stable, so ties and missing deltas keep list order.
+        candidates.sort(key=lambda c: (c[3] is None, -(c[3] or 0.0)))
+        budget_cents = round(self.rules.total_budget * 100)
+        for rank, (signal, contract, qty, delta) in enumerate(candidates, start=1):
+            cost_cents = qty * 100 * math.ceil(contract.ask * 100 - 1e-6)
+            left_cents = budget_cents - self.store.committed_cents(self.mode.value)
+            detail = {"rank": rank, "delta": delta, "delta_source": self.rules.rank_delta_source,
+                      "ask": contract.ask, "cost": cost_cents / 100, "budget_left": left_cents / 100,
+                      "total_budget": self.rules.total_budget}
+            if cost_cents > left_cents:
+                self._record_skip(signal, day, "budget",
+                    f"does not fit the total budget: costs ${cost_cents / 100:.2f} at the ask, "
+                    f"${max(left_cents, 0) / 100:.2f} of ${self.rules.total_budget:.2f} left "
+                    f"(rank {rank} by {self.rules.rank_delta_source} delta)", detail)
                 continue
             try:
                 result = self.broker.place_entry(
@@ -363,12 +383,21 @@ class Engine:
                 self._alert_order_problem("buy", contract.osi_symbol, exc, key=f"entry:{signal.id}")
                 continue  # recorded for a person; never resubmitted
             if self.quote_source is not None and hasattr(self.quote_source, "register"):
-                self.quote_source.register(contract.osi_symbol, mid)
+                self.quote_source.register(contract.osi_symbol, contract.mid)
             self.log.info(
-                "ENTRY %s %s x%d @ ask %.2f -> status=%s broker_id=%s%s",
-                signal.id, contract.osi_symbol, qty, contract.ask, result.status,
+                "ENTRY %s %s x%d @ ask %.2f (rank %d, %s delta %s) -> status=%s broker_id=%s%s",
+                signal.id, contract.osi_symbol, qty, contract.ask, rank, self.rules.rank_delta_source,
+                "n/a" if delta is None else f"{delta:g}", result.status,
                 result.broker_order_id, " (dedup)" if result.deduplicated else "",
             )
+
+    def _rank_delta(self, signal, contract) -> float | None:
+        """|delta| used to rank a pick, from the configured source, or None."""
+        value = (contract.delta if self.rules.rank_delta_source == "schwab_live"
+                 else signal.signal_delta_tvt)
+        if value is None or not math.isfinite(value):
+            return None
+        return abs(value)
 
     def _record_skip(self, signal, day, category, reason, detail):
         self.log.warning("skip %s: %s", signal.id, reason)

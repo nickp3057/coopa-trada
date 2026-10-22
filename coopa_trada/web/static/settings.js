@@ -13,11 +13,11 @@ const ewRows = document.getElementById("exit-window-rows");
 const PCT_OR_INT_FIELDS = [
   "entry_minutes_before_close", "poll_interval_seconds",
   "trailing_stop_pct", "hard_stop_loss_pct", "take_profit_pct",
-  "max_concurrent_positions", "max_dollars_per_position",
+  "total_budget", "max_dollars_per_position",
   "cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct",
   "profit_trail_points",
 ];
-const TEXT_FIELDS = ["profit_trail_arm", "held_exit_start"];
+const TEXT_FIELDS = ["profit_trail_arm", "held_exit_start", "rank_delta_source"];
 const BOOL_FIELDS = ["stops_on_entry_day"];
 const DELTA_NUMBERS = ["min_abs_delta", "max_abs_delta"];
 

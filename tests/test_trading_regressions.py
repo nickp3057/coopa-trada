@@ -185,14 +185,20 @@ def test_delayed_entry_is_monitored_through_exit_fill(store):
     assert not store.orders_open("LIVE")
 
 
-def test_cap_uses_ask_and_pending_entries_reserve_slots(store):
+def test_cap_uses_ask_and_pending_entries_reserve_budget(store):
     assert FixedQuantitySizer(100).size(None, SimpleNamespace(mid=.99, ask=1.01), None) == 0
     client = Client()
     eng = engine(store, SchwabBroker(client, "account", store, None))
-    eng.rules = replace(eng.rules, max_concurrent_positions=1)
-    eng.source = SimpleNamespace(fetch=lambda day: [signal(), replace(signal(), id="second", underlying="QQQ")])
+    first, second = signal(), replace(signal(), id="second", underlying="QQQ")
+    asks = [eng.resolver.resolve(s).ask for s in (first, second)]
+    # Room for either pick but not both: the first (still unfilled, WORKING) buy
+    # order reserves its cost, so the second does not fit. (Replaces the old
+    # position-count limit, which Cooper removed.)
+    eng.rules = replace(eng.rules, total_budget=round(sum(asks) * 100 - 0.01, 2), max_dollars_per_position=1000)
+    eng.source = SimpleNamespace(fetch=lambda day: [first, second])
     eng._entry_pass(DAY)
     assert len(client.submitted) == 1
+    assert store.conn.execute("SELECT category FROM skip_events").fetchone()[0] == "budget"
 
 
 @pytest.mark.parametrize("key", list(SETTING_LABELS))

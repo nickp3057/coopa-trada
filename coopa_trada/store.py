@@ -8,6 +8,7 @@ as JSON text. A test reconstructs a complete round trip from the DB only.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -415,6 +416,29 @@ class Store:
             ORDER BY order_id
             """, (mode, mode)
         ).fetchall()
+
+    def committed_cents(self, mode: str) -> int:
+        """What all open positions and working buy orders in ``mode`` cost, in cents.
+
+        Counted conservatively for the total budget: each entry at the higher of its
+        limit (the ask it was bought at) and its average fill price, times 100 per
+        contract. A buy order that is still open (or unknown) reserves its whole
+        unsold quantity; a closed one counts what was filled and not yet sold.
+        """
+        total = 0
+        for o in self.conn.execute("SELECT * FROM orders WHERE intent='ENTRY' AND mode=?", (mode,)):
+            fills = self.fills_for_order(o["id"])
+            filled = sum(f["quantity"] for f in fills)
+            avg = sum(f["quantity"] * f["price"] for f in fills) / filled if filled else 0.0
+            sold = self.conn.execute(
+                """SELECT COALESCE(SUM(f.quantity), 0) FROM fills f JOIN orders x ON x.id = f.order_id
+                   WHERE x.intent='EXIT' AND x.entry_order_id=? AND x.mode=?""", (o["id"], mode)).fetchone()[0]
+            held = (o["quantity"] if o["status"] not in _CLOSED_ORDER_STATUSES else filled) - sold
+            if held > 0:
+                # Round fractions of a cent up: the budget must never be understated.
+                price_cents = math.ceil(max(o["limit_price"] or 0.0, avg) * 100 - 1e-6)
+                total += held * price_cents * 100
+        return total
 
     def update_peak(self, order_id: int, mid: float) -> None:
         self.conn.execute(

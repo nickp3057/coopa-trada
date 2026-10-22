@@ -31,7 +31,10 @@ SETTING_LABELS = {
     "profit_point_trail": "profit-point trailing exit",
     "entry_day_stops": "stops on the day of entry",
     "next_day_exits": "next-day exit start",
+    "total_budget": "total budget",
+    "delta_ranking": "which delta ranks picks",
 }
+RANK_DELTA_SOURCES = ("schwab_live", "tvt")
 
 
 def setting_confirmations(raw: dict | None = None) -> dict:
@@ -110,7 +113,6 @@ class Rules:
     trailing_stop_pct: float
     hard_stop_loss_pct: float
     take_profit_pct: float
-    max_concurrent_positions: int
     max_dollars_per_position: float
     poll_interval_seconds: int
     delta_filter: DeltaFilter = field(default_factory=DeltaFilter)
@@ -130,6 +132,14 @@ class Rules:
     # When held positions start being watched on the next trading day:
     # "open" (the session open), a New York HH:MM time, or minutes before the close.
     held_exit_start: object = "open"
+    # Cooper: $300 is the TOTAL budget, the most that all open positions together
+    # may cost (including ones held from earlier days), checked at ask x 100.
+    # There is no position-count limit: picks are bought, highest delta first,
+    # while each still fits.
+    total_budget: float = 300.0
+    # Which delta ranks the picks: "schwab_live" (from Schwab's option chain at
+    # buying time) or "tvt" (the TVT-DELTA column of the pick list).
+    rank_delta_source: str = "schwab_live"
 
     def live_block_reason(self) -> str | None:
         """Why a live run must not start, or None. Dry runs ignore this."""
@@ -230,7 +240,6 @@ def load_rules(path: str | Path) -> Rules:
         "trailing_stop_pct",
         "hard_stop_loss_pct",
         "take_profit_pct",
-        "max_concurrent_positions",
         "max_dollars_per_position",
         "poll_interval_seconds",
     }
@@ -278,7 +287,18 @@ def load_rules(path: str | Path) -> Rules:
     else:
         held_start = "open"
 
+    # max_concurrent_positions (a fixed position count) was removed at Cooper's
+    # request; older files may still carry it and it is ignored.
+    budget = float(data.get("total_budget", 300.0))
+    if not math.isfinite(budget) or budget <= 0:
+        raise ValueError("total_budget must be a positive dollar amount")
+    rank_source = data.get("rank_delta_source", "schwab_live")
+    if rank_source not in RANK_DELTA_SOURCES:
+        raise ValueError(f"rank_delta_source must be one of: {', '.join(RANK_DELTA_SOURCES)}")
+
     return Rules(
+        total_budget=budget,
+        rank_delta_source=rank_source,
         stops_on_entry_day=stops_today,
         held_exit_start=held_start,
         profit_trail_points=trail_points,
@@ -290,7 +310,6 @@ def load_rules(path: str | Path) -> Rules:
         trailing_stop_pct=_pct("trailing_stop_pct", data["trailing_stop_pct"]),
         hard_stop_loss_pct=_pct("hard_stop_loss_pct", data["hard_stop_loss_pct"]),
         take_profit_pct=_pct("take_profit_pct", data["take_profit_pct"]),
-        max_concurrent_positions=_pos_int("max_concurrent_positions", data["max_concurrent_positions"]),
         max_dollars_per_position=max_dollars,
         poll_interval_seconds=_pos_int("poll_interval_seconds", data["poll_interval_seconds"]),
         cooper_drop_from_peak_pct=(
