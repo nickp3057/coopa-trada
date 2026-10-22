@@ -111,16 +111,24 @@ happened and where to look. The same alert is repeated at most every 6 hours
 
 ## 3. Every trading day
 
-1. **Open the app** (double-click it). The Dashboard opens.
+The full trading rules, with dollar examples, are in **docs/HOW_IT_TRADES.md**.
+
+1. **Open the app** (double-click it) **before the market opens** (7:30 AM MT) if
+   anything was held overnight, otherwise any time before 1:30 PM MT. The Dashboard opens.
 2. **Check Schwab**: it should say **Connected** (or **Expiring soon**; see section 4).
-3. **Upload the picks** under **Upload your picks**:
-   - Choose the CSV file or a **screenshot** of the picks table, then click **Read file**.
-   - Enter the **Trade date** and the **Expiration** date.
-   - Check every row in the box against the original. Fix any misread text right there.
-   - Click **Preview picks**, check the table, then click **Confirm and select these picks**.
-4. **Start the run**: click **Start today's run (dry‑run)**. The bot waits until about
-   20 minutes before the market closes, buys, then watches and sells according to the
-   settings.
+3. **Start the run**: click **Start today's run (dry‑run)**. The run watches anything
+   held from yesterday and waits for today's picks. The status line says what it's doing.
+4. **Send the picks** when they arrive (1:40–1:55 PM MT), either way:
+   - **Telegram** (if set up, see docs/TELEGRAM_SETUP.md): forward the screenshot to the
+     bot, check the list it sends back, press **✅ Confirm**.
+   - **Dashboard**: under **Upload your picks**, choose the CSV or screenshot, click
+     **Read file**, enter the **Trade date** and **Expiration**, check every row
+     (fix misread text right there), click **Preview picks**, then **Confirm and select
+     these picks**.
+
+   The run **buys as soon as you confirm**, between 1:30 and 1:57 PM MT (earlier on half
+   days). Then it watches and sells by the rules: a take-profit sells the same day;
+   otherwise the position is held and sold on the next trading day.
 5. **Leave the Mac plugged in, lid open, and the app open** until the run finishes
    after the close (see "Why plugged in and lid open" below).
 
@@ -197,7 +205,8 @@ Friday morning**, then a Friday run is always covered.
 | **Live runs are blocked: these settings are not confirmed** | Settings still need your OK | Go through **Settings** with Nick |
 
 On the **Settings** page, **Unconfirmed** badges mark the choices waiting for your
-decision (spending cap, the 10% stop, delta filter). Real trading stays off until
+decision (the budget, the 10-point rule, hold and stop timing, sell repricing, the
+buying window, and more; the questions are at the end of docs/HOW_IT_TRADES.md). Real trading stays off until
 each one is ticked **Confirmed with Cooper**. Changing a confirmed value un-ticks
 it, so you have to confirm the new value.
 

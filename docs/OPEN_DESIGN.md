@@ -1,5 +1,14 @@
 # Open design questions
 
+> **Update 2026-10-22 (Cooper's answers).** (a) Repricing is now built: an unfilled
+> sell is moved to the current bid after 60 s, at most 5 times, never a market
+> order. Overnight holds are now deliberate (take-profit sells the same day,
+> otherwise the position is held to the next trading day), and buying happens when
+> picks are confirmed (1:30–1:57 PM MT), not 20 minutes before the close. The
+> position-count limit was replaced by a $300 total budget. The text below is the
+> original analysis; see docs/HOW_IT_TRADES.md for the current rules. (b) and (c)
+> remain open.
+
 Three decisions that are not built yet. Each section explains the problem in
 plain language, lays out the options, recommends a default, and ends with what
 Cooper would need to answer.
