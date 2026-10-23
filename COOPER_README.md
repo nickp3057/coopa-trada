@@ -186,8 +186,11 @@ Schwab makes everyone **log in again every 7 days**. The app counts down for you
   turns red even when there are still several days left, and the run won't start.
 
 Do the reconnect (section 2b, steps 1–7) **before** starting a run. It is refused
-while a run is in progress. The easy habit: **reconnect every Thursday or
-Friday morning**, then a Friday run is always covered.
+while a run is in progress. Because of the overnight hold, one 7-day login covers
+only **4 trading days of runs**, so once a week is not enough. The easy habit:
+**reconnect every Monday and Thursday afternoon** (after that day's run has
+finished). That covers every run, holiday weeks included. The app also alerts you
+("Reconnect Schwab before the next run") the day before a run it wouldn't cover.
 
 ---
 

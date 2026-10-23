@@ -1,0 +1,51 @@
+# Coopa Trada on a Linux server (systemd). See docs/AWS_SETUP.md.
+#
+# Install:  sudo cp deploy/coopa-trada.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now coopa-trada
+# Logs:     journalctl -u coopa-trada -f
+#
+# Restart on crash: Restart=always (10 s later, at most 5 times in 10 minutes,
+# then it stays down and you get no more restarts until you look).
+# Restart on reboot: WantedBy=multi-user.target (enabled = started at boot).
+#
+# The dashboard listens on 127.0.0.1 only. Reach it privately through Tailscale
+# (docs/AWS_SETUP.md); never open port 8770 to the internet.
+
+[Unit]
+Description=Coopa Trada (dashboard, daily auto-start, alerts)
+Wants=network-online.target
+After=network-online.target time-sync.target
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=coopa
+Group=coopa
+WorkingDirectory=/opt/coopa-trada
+# .env, config/, trada.db and schwab_token.json are read from WorkingDirectory.
+ExecStart=/opt/coopa-trada/.venv/bin/python -m coopa_trada.web --host 127.0.0.1 --port 8770
+Restart=always
+RestartSec=10
+# Times in the log in Mountain time (the app itself is timezone-aware either way).
+Environment=TZ=America/Denver
+Environment=PYTHONUNBUFFERED=1
+# Run locks next to the app, not in a home folder (ProtectHome below).
+Environment=COOPA_TRADA_LOCK_DIR=/opt/coopa-trada/locks
+# Every file the app creates (the Schwab login, the database) is private to its owner.
+UMask=0077
+
+# Hardening: the app can only write inside its own folder.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/coopa-trada
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

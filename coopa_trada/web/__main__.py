@@ -15,11 +15,13 @@ import argparse
 import os
 
 from ..config import load_env
+from ..logs import setup_logging
 from . import create_app  # noqa: F401
 
 
 def main(argv: list[str] | None = None) -> int:
     load_env()
+    setup_logging()  # INFO lines to stderr (the journal on a server)
     parser = argparse.ArgumentParser(prog="coopa_trada.web", description=__doc__)
     parser.add_argument("--host", default="127.0.0.1", help="bind address (localhost only by default)")
     parser.add_argument("--port", type=int, default=8770)

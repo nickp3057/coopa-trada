@@ -217,6 +217,13 @@ The app never enables the environment opt-in itself.
 The broker adapter uses the documented [schwab-py order methods](https://schwab-py.readthedocs.io/en/latest/client.html)
 and [single-leg limit order templates](https://schwab-py.readthedocs.io/en/latest/order-templates.html).
 
+## Server deployment
+
+`deploy/` has a systemd unit (restart on crash and on boot, localhost-only dashboard,
+`UMask=0077`, Mountain-time logs), `setup_server.sh` (Ubuntu 24.04: time zone, swap,
+venv, service) and `lock_down.sh` (owner-only `.env`, Schwab login and database).
+Beginner walkthrough: **docs/AWS_SETUP.md** (t4g.micro, Tailscale, weekly reconnect).
+
 ## Limits and remaining integration work
 
 - No multi-leg spreads, strike-selection heuristics, or per-row expirations.
