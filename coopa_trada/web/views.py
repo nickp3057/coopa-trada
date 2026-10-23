@@ -109,6 +109,9 @@ def api_run_status():
     snap["live_env_enabled"] = _live_env_enabled()
     snap["live_confirm_phrase"] = LIVE_CONFIRM_PHRASE
     snap["keep_awake"] = current_app.config["COOPA_KEEPAWAKE"].status()
+    scheduler = current_app.config.get("COOPA_SCHEDULER")
+    if scheduler is not None:
+        snap["schedule"] = scheduler.snapshot()
     snap.update(live_status(_paths().config_path))
     return jsonify(snap)
 

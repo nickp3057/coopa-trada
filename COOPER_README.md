@@ -118,6 +118,10 @@ The full trading rules, with dollar examples, are in **docs/HOW_IT_TRADES.md**.
 2. **Check Schwab**: it should say **Connected** (or **Expiring soon**; see section 4).
 3. **Start the run**: click **Start today's run (dry‑run)**. The run watches anything
    held from yesterday and waits for today's picks. The status line says what it's doing.
+   If Nick turned on **auto-start** (`AUTO_START=1` in `.env`), the app starts it by
+   itself at 7:15 AM MT on trading days, as long as it is open and the Schwab login
+   lasts through the next trading day's selling window. If it can't, your phone gets
+   "Coopa Trada did not start today" with the reason; fix it, then click Start.
 4. **Send the picks** when they arrive (1:40–1:55 PM MT), either way:
    - **Telegram** (if set up, see docs/TELEGRAM_SETUP.md): forward the screenshot to the
      bot, check the list it sends back, press **✅ Confirm**.
@@ -214,7 +218,8 @@ it, so you have to confirm the new value.
 
 ## 6. Things the app never does on its own
 
-- Switch from practice to real trading.
+- Switch from practice to real trading. (Auto-start runs practice unless Nick sets
+  it up for real trading on purpose, and even then every live check still applies.)
 - Resend an order it is unsure about.
 - Sell when you press **Stop**.
 - Send your Schwab password anywhere. You type it only on Schwab's own website.

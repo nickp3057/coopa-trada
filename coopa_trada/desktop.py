@@ -163,8 +163,9 @@ def main(argv: list[str] | None = None) -> int:
                         app.config["COOPA_ALERTER"], keep_awake=app.config["COOPA_KEEPAWAKE"]).start()
     app.config["COOPA_RUNNER"].on_change = watchdog.poke
     app.config["COOPA_WATCHDOG"] = watchdog
-    from .web import start_telegram
+    from .web import start_scheduler, start_telegram
     telegram = start_telegram(app)
+    scheduler = start_scheduler(app)
     app.config["COOPA_HOME"] = str(home)
     # Delayed so the "has quit" reply finishes sending before the server stops.
     app.config["COOPA_SHUTDOWN"] = lambda: threading.Timer(0.5, server.shutdown).start()
@@ -182,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         deadline = time.monotonic() + 10
         while runner.status == "running" and time.monotonic() < deadline:
             time.sleep(0.1)
+        scheduler.stop()
         watchdog.stop()
         if telegram is not None:
             telegram.stop()

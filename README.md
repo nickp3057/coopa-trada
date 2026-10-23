@@ -49,6 +49,17 @@ file paths, and selection changes are blocked until it stops.
 The original CSV-path endpoint and CLI remain available for already-prepared CSVs.
 The sample `data/signals.example.csv` matches the supplied screenshot exactly.
 
+## Daily auto-start
+
+Optional (`AUTO_START=1` in `.env`; `coopa_trada/scheduler.py`). On XNYS trading days
+at `AUTO_START_TIME` (Mountain time, default 07:15, before the 07:30 MT open) the app
+starts the day's run through the same runner as the Start button. It refuses, with an
+alert, when the Schwab login won't last through the next trading day's exit window,
+when the rules file can't be read, or (live only) when `LIVE_TRADING` is off or a
+setting is unconfirmed. Practice is the default; a live auto-start also needs
+`AUTO_START_LIVE="ENABLE LIVE TRADING"`, and the engine still applies every live gate.
+One attempt per day per process; a restart tries again.
+
 ## Trading behavior
 
 Plain-English rules with dollar examples: **docs/HOW_IT_TRADES.md**.
