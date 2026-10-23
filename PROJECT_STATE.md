@@ -1,18 +1,95 @@
 # Project state — Coopa Trada
 
-_Last updated: 2026-10-22_
+_Last updated: 2026-10-22 (second session: server readiness)_
 
 Local Python/Flask app for Cooper's FOMC Picks, packaged as a double-click macOS
-app and now also runnable on a server. Cooper answered his rule questions on
-2026-10-22; this session implemented them. Simulation remains the default, every
-new setting is **unconfirmed** (so live runs stay blocked until Nick/Cooper tick
-them in Settings), and **no live order has ever been placed**. The only real Schwab
-request so far is still Nick's login (2026-10-16).
+app and now ready to run unattended on a small Linux server. Simulation remains the
+default, every trading setting is still **unconfirmed** (so live runs stay blocked),
+and **no live order has ever been placed**. The only real Schwab request so far is
+still Nick's login (2026-10-16).
 
-The plain-English rulebook for Cooper, with dollar examples and the open yes/no
-questions, is **`docs/HOW_IT_TRADES.md`**.
+The plain-English rulebook for Cooper is **`docs/HOW_IT_TRADES.md`**; the server guide
+is **`docs/AWS_SETUP.md`**.
 
-## Session summary (2026-10-22)
+## Session summary (2026-10-22, server readiness)
+
+Branched from `master` (`bd2734c`), one branch and one commit per task, stacked
+(each branch contains the ones before it). **Nothing merged into master, nothing
+pushed.** **360 tests at the start, 408 at the end, all passing.**
+
+| Task | Branch | Commit | Status |
+|---|---|---|---|
+| 1 Auto-start each trading day | `task-1-autostart` | `5e21742` | Done |
+| 2 End-of-day summary alert | `task-2-daily-summary` | `d0ab178` | Done |
+| 3 Server deployment pack | `task-3-deploy` | `d604b63` | Written; **not run on a real server** |
+| 4 Weekend rehearsal script | `task-4-rehearsal` | `ca1569e` | Done |
+| PROJECT_STATE + .gitignore | `task-4-rehearsal` | (this commit) | Done |
+
+What changed:
+
+- **Auto-start** (`coopa_trada/scheduler.py`, thread next to the watchdog in the Mac app
+  and `python -m coopa_trada.web`): off unless `AUTO_START=1`. On XNYS trading days at
+  `AUTO_START_TIME` (MT, default 07:15) it starts the day's run via the same
+  `EngineRunner` as the Start button, only if the Schwab login lasts through the next
+  trading day's exit window (`hold_needed_until`). Otherwise an alert (Mac + ntfy):
+  "Coopa Trada did not start today" with the reason. Practice by default; live needs
+  `AUTO_START_LIVE="ENABLE LIVE TRADING"` **and** `LIVE_TRADING=1` **and** confirmed
+  settings, then the engine applies every live gate again. Shown in `/api/run/status`
+  as `schedule`.
+- **End-of-day summary** (`coopa_trada/summary.py`): after the day's latest exit
+  window ends and no run is active (at the latest 30 min after the close), one alert:
+  picks received, bought, skipped, held overnight, open issues. Counts only. Once per
+  trading day (marker `trada.db.summary-sent`). `DAILY_SUMMARY=0` turns it off.
+- **Deploy pack** (`deploy/`): systemd unit (`Restart=always`, enabled at boot,
+  127.0.0.1 only, `UMask=0077`, `TZ=America/Denver`, `ProtectSystem=strict`, locks in
+  the app folder), `setup_server.sh` (Ubuntu 24.04: time zone, swap, user, venv,
+  service) and `lock_down.sh` (owner-only `.env`, token, database).
+  `docs/AWS_SETUP.md`: t4g.micro, Tailscale `serve`, permissions, headless reconnect.
+  `python -m coopa_trada.web` now sets up logging so INFO lines reach the journal.
+- **Rehearsal** (`python -m coopa_trada rehearse`, `coopa_trada/rehearsal.py`): pretend
+  Fri 2026-10-23 to Mon 10-26: picks at 1:40 PM MT, three buys, held overnight, then a
+  take-profit at the open, a 10-point-rule exit, and a sell that doesn't fill and is
+  canceled and replaced at the lower bid 60 s later. Plain-English timeline.
+
+## Decisions made this session (conservative option each time)
+
+1. **Auto-start is opt-in** (`AUTO_START=1`); nothing changes for Cooper's Mac until set.
+2. **The login check applies to practice auto-starts too** (the task says "only if the
+   login is valid"), so a lapsing login is caught before it matters. Manual practice
+   runs from the dashboard are unchanged (they still need no login).
+3. **Live auto-start needs its own typed opt-in**: `AUTO_START_LIVE` must equal the
+   dashboard's confirm phrase, standing in for the phrase a person types at Start.
+   If it is set but `LIVE_TRADING` is off, **nothing starts** (it does not quietly fall
+   back to practice) and an alert says why.
+4. **One attempt per trading day per process, no retries.** A refused start waits for a
+   person. After a crash/reboot restart it tries again (if before the close) so the
+   day's positions are watched; a stale lock from a LIVE run still blocks, as before.
+5. A start after the open still happens (logged as late); after the close, nothing.
+6. **Summary on by default** (it was requested); sent through the existing alerter,
+   so it also appears as a Mac notification. It waits for an active run, but not past
+   close + 30 min. "Bought" = buy orders with a fill; buys that never filled are shown
+   as "not filled"; "received" = the confirmed list plus anything the engine bought or
+   skipped that day. No contract names, no amounts, no error text.
+7. **systemd, not Docker**: plain files, journald, no container engine on 1 GB.
+8. **Dashboard stays on 127.0.0.1**; reached via `tailscale serve` (tailnet only, never
+   `funnel`), SSH tunnel as fallback. The same-origin check was **not** loosened for the
+   Tailscale hostname; if `serve` breaks POSTs, the tunnel is the documented answer.
+9. **A `systemctl restart` during a LIVE run is treated like a crash** (no new SIGTERM
+   handling): the stale-lock gate stays, and the guide says to restart outside hours.
+10. **Rehearsal uses the real-order code path against an in-memory pretend Schwab**,
+    because exit repricing only exists for real orders (practice sells fill at once).
+    Rules are marked confirmed in memory only; network connections are refused while it
+    runs; no `.env`, no token, temp database deleted; alerts printed, never sent.
+11. **Reconnect advice corrected** (COOPER_README, AWS guide). Because of the overnight
+    hold plus the 30-min margin, one 7-day login covers **4 trading-day runs**. The old
+    "reconnect every Thursday or Friday morning" habit left Thursday's run blocked every
+    week. New habit, checked in code against every trading day Sep 2026 – Feb 2027:
+    **Monday and Thursday afternoons**.
+
+Existing tests changed: none. One Task 1 test was adjusted in Task 2 (an after-close
+tick now also sends the day's summary; it still asserts no start and no refusal alert).
+
+## Earlier session (2026-10-22, Cooper's rules)
 
 One branch and one commit per task, stacked in order (each branch contains the
 ones before it); `claude/gracious-einstein-a30t1n` was fast-forwarded to the last one.
@@ -62,7 +139,7 @@ What changed, briefly:
 - **Telegram** (`coopa_trada/telegram_bot.py`, `docs/TELEGRAM_SETUP.md`): forward
   screenshot → preview with Confirm/Reject (also on the dashboard); allowed chat IDs only.
 
-## Decisions made (conservative option on each ambiguity)
+### Decisions made in that session
 
 1. **Task 0 could not run here**: no Schwab login in the cloud container. Built the
    read-only command instead; Nick runs it on his Mac.
@@ -120,6 +197,11 @@ run is accepted; the unknown-order test gets budget for both picks.
 
 ## Still untested
 
+- **Everything in `deploy/` on a real server**: `setup_server.sh` on Ubuntu 24.04 Arm,
+  the systemd unit, `tailscale serve` with the dashboard's same-origin check, the
+  Reconnect flow from a phone, ntfy from the server.
+- Auto-start and the summary inside the running app over a real day (unit-tested with a
+  fake clock and fake runner only).
 - Every real Schwab call except the login: run `python -m coopa_trada readonly-check`
   on the Mac first, then a dry-run day on real prices.
 - Real Claude API and Telegram Bot API calls (both only mocked).
@@ -136,15 +218,21 @@ run is accepted; the unknown-order test gets budget for both picks.
   With `from_entry` arming and stops on the entry day, an option whose bid-ask gap is
   about 20% of its price or more starts at about −10% and is sold on the first check
   (e.g. $0.80/$1.00: pays $1.00, sells at $0.80). Cooper's questions 1 and 2 decide it.
-- **The day's run must be started by a person** (ideally before the open when
-  something is held). Telegram confirmation does not start a run; the bot's reply
-  says when no run is active, and the watchdog alerts on unwatched real positions.
+- **The day's run must be started by a person unless `AUTO_START=1`** (new this
+  session). Telegram confirmation does not start a run; the bot's reply says when no
+  run is active, and the watchdog alerts on unwatched real positions.
+- **Schwab reconnect is needed about every 4 trading days**, not weekly (see decision 11
+  above). Auto-start skips, with an alert, any day the login wouldn't cover.
+- **Only one machine may run Coopa Trada.** Run locks are per computer and a Telegram
+  bot can be polled by one process; the Mac app and the server must never both run.
 - Telegram previews are kept in memory: a restart loses pending previews (Cooper
   resends the screenshot).
 - **Market calendar expires** at the session of 2027-10-15 (`exchange_calendars`).
 
 ## Next steps
 
+0. Nick: review and merge `task-4-rehearsal` (contains tasks 1–4) into `master`; run
+   `python -m coopa_trada rehearse` once to see the weekend timeline.
 1. Nick: `python -m coopa_trada readonly-check` on the Mac; report only OK/FAILED lines.
 2. Cooper: answer the 11 questions at the end of `docs/HOW_IT_TRADES.md`; tick the
    confirmed settings in Settings.
@@ -152,16 +240,22 @@ run is accepted; the unknown-order test gets budget for both picks.
    a test screenshot.
 4. A supervised dry-run day on real quotes, then supervised live checks of the order
    lifecycle (buy, sell, a forced reprice) with one cheap contract.
-5. Rebuild the macOS app; server prep (systemd, Tailscale) as listed before.
+5. Rebuild the macOS app (it now includes the scheduler and summary).
+6. Nick: follow `docs/AWS_SETUP.md` on a t4g.micro; check `tailscale serve` with
+   Settings → Send test alert; do one Reconnect from the phone; then set `AUTO_START=1`
+   and watch a practice day's 7:15 AM start and ~2 PM summary arrive on the phone.
 
 ## Validation
 
-**360 automated tests pass** (249 at the start of this session)
-(`.venv/bin/python -m pytest`). New suites: `test_readonly_check`, `test_profit_trail`,
+**408 automated tests pass** (360 at the start of the server-readiness session; 249
+before the Cooper's-rules session). New suites: `test_scheduler`, `test_daily_summary`,
+`test_deploy`, `test_rehearsal` (run with `.venv/bin/python -m pytest`). Earlier
+session's suites: `test_readonly_check`, `test_profit_trail`,
 `test_hold_logic`, `test_sizing`, `test_exit_repricing`, `test_entry_timing`,
 `test_vision`, `test_telegram`. `packaging/verify_app.py --source` passes inside the
-suite. A browser check (Playwright, headless Chromium) loaded Settings and the
-Dashboard with no JavaScript errors and saved a confirmation.
+suite. In the earlier session a browser check (Playwright, headless Chromium) loaded
+Settings and the Dashboard with no JavaScript errors; not repeated this session (the
+only UI change is an extra `schedule` field in `/api/run/status`, covered by a test).
 
 ## Earlier sessions (reference)
 

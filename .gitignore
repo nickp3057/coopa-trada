@@ -4,6 +4,7 @@ schwab_token.json
 *.db
 *.db-journal
 *.db-wal
+*.db.summary-sent
 config/rules.yaml
 
 # python
