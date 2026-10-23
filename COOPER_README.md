@@ -122,6 +122,9 @@ The full trading rules, with dollar examples, are in **docs/HOW_IT_TRADES.md**.
    itself at 7:15 AM MT on trading days, as long as it is open and the Schwab login
    lasts through the next trading day's selling window. If it can't, your phone gets
    "Coopa Trada did not start today" with the reason; fix it, then click Start.
+   After the selling window closes (about 2 PM MT) your phone gets one **summary**:
+   how many picks came in, were bought and skipped, what is held overnight, and
+   anything that needs you. It never shows account numbers or dollar amounts.
 4. **Send the picks** when they arrive (1:40–1:55 PM MT), either way:
    - **Telegram** (if set up, see docs/TELEGRAM_SETUP.md): forward the screenshot to the
      bot, check the list it sends back, press **✅ Confirm**.

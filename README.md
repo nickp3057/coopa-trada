@@ -60,6 +60,14 @@ setting is unconfirmed. Practice is the default; a live auto-start also needs
 `AUTO_START_LIVE="ENABLE LIVE TRADING"`, and the engine still applies every live gate.
 One attempt per day per process; a restart tries again.
 
+**End-of-day summary** (`DAILY_SUMMARY`, on by default; `coopa_trada/summary.py`): once
+the day's latest exit window has ended and no run is active (at the latest 30 minutes
+after the close), one alert with picks received, bought, skipped, positions held
+overnight and open issues (orders to reconcile, orders still working, a run error, a
+skipped auto-start, a stale live lock, a login that won't cover the next run). Counts
+only; no account numbers or amounts. Sent once per trading day (a marker file next to
+the database survives restarts).
+
 ## Trading behavior
 
 Plain-English rules with dollar examples: **docs/HOW_IT_TRADES.md**.

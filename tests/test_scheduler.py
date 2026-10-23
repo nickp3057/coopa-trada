@@ -128,7 +128,8 @@ def test_no_start_and_no_alert_on_non_trading_days(make, when):
 def test_app_started_after_the_close_does_nothing_that_day(make):
     sched = make(start=datetime(2026, 9, 2, 20, 30, tzinfo=UTC))  # 2:30 PM MT
     sched.tick()
-    assert sched.runner.starts == [] and sched.notifier.sent == []
+    assert sched.runner.starts == []
+    assert [a.kind for a in sched.notifier.sent] == ["daily_summary"]  # no start, no refusal
 
 
 def test_app_started_after_the_open_still_starts_and_says_late(make):
