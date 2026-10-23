@@ -5,6 +5,7 @@
     coopa_trada resolve   --signals P [--date YYYY-MM-DD]
     coopa_trada unlock    [--db P] [--force-other-host]
     coopa_trada readonly-check [--symbol SPY]
+    coopa_trada rehearse  [--verbose]
 
 Every subcommand loads ``.env``, resolves the run mode, and prints the banner.
 """
@@ -64,6 +65,10 @@ def build_parser() -> argparse.ArgumentParser:
     chk = sub.add_parser("readonly-check",
                          help="read-only Schwab check: accounts, balances, positions, one option chain")
     chk.add_argument("--symbol", default="SPY", help="liquid ticker for the option-chain check")
+
+    reh = sub.add_parser("rehearse",
+                         help="replay a pretend Friday-to-Monday cycle (fake clock, fake prices, no Schwab)")
+    reh.add_argument("--verbose", action="store_true", help="also show the engine's own log lines")
 
     return p
 
@@ -258,8 +263,20 @@ def cmd_readonly_check(args) -> int:
     return 0 if report.ok else 1
 
 
+def cmd_rehearse(args) -> int:
+    """Never reads .env or the Schwab login; never uses the network."""
+    from .rehearsal import rehearse
+
+    if args.verbose:
+        setup_logging()
+    print("\n".join(rehearse(verbose=args.verbose)))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.command == "rehearse":
+        return cmd_rehearse(args)  # before load_env: the rehearsal uses no settings
     load_env()
     handler = {
         "run": cmd_run,

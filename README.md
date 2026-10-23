@@ -179,6 +179,20 @@ SYMBOL,OPTION,LAST PRICE,TVT-DELTA,SCHWAB DELTA
 IBIT,44P,0.71,66.4,-0.554
 ```
 
+### Weekend rehearsal
+
+```bash
+python -m coopa_trada rehearse
+```
+
+Replays a pretend Friday-to-Monday cycle on a fake clock with fake prices
+(`coopa_trada/rehearsal.py`) and prints a plain-English timeline: picks confirmed at
+1:40 PM MT Friday and bought, held over the weekend, then on Monday a take-profit, a
+10-point-rule exit and an unfilled sell canceled and replaced at the lower bid. It runs
+the real engine and Schwab order code against an in-memory pretend Schwab: no `.env`, no
+Schwab login, network connections refused, database in a deleted temp folder, alerts
+printed only. `--verbose` adds the engine's own log lines.
+
 ## Schwab connection and live mode
 
 This version has been tested with simulated responses, **not a real Schwab
