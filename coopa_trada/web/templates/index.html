@@ -18,8 +18,22 @@
     <label>Trade date <input id="picks-date" type="date" required></label>
     <label>Expiration <input id="picks-expiration" type="date" required></label>
   </div>
-  <label class="block" for="picks-csv">Extracted picks — correct any reading errors here</label>
-  <textarea id="picks-csv" rows="10" spellcheck="false" placeholder="SYMBOL,OPTION,LAST PRICE,TVT-DELTA,SCHWAB DELTA"></textarea>
+  <div class="check-area">
+    <figure id="picks-figure" class="picks-figure" hidden>
+      <img id="picks-image" alt="The uploaded picture of the picks">
+      <figcaption class="hint">Your picture: compare each row with the table.</figcaption>
+    </figure>
+    <div class="picks-grid-wrap">
+      <p class="hint" id="picks-grid-hint">Read a file, then check every cell against the picture. Fix any mistake right in the table.</p>
+      <div id="picks-grid" class="table-wrap"></div>
+      <div class="row"><button id="picks-add-row" class="btn" type="button" hidden>Add a row</button></div>
+    </div>
+  </div>
+  <details class="raw-text">
+    <summary>Raw text (advanced)</summary>
+    <label class="block" for="picks-csv">The same picks as text; the table and this box stay in step</label>
+    <textarea id="picks-csv" rows="8" spellcheck="false" placeholder="SYMBOL,OPTION,LAST PRICE,TVT-DELTA,SCHWAB DELTA"></textarea>
+  </details>
   <div class="row"><button id="picks-preview" class="btn">Preview picks</button><button id="picks-confirm" class="btn btn-primary" disabled>Confirm and select these picks</button></div>
   <p id="picks-message" role="status"></p>
   <div id="picks-table" class="table-wrap"></div>

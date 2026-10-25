@@ -5,6 +5,7 @@ import csv
 import io
 import json
 import os
+import re
 import platform
 import shutil
 import subprocess
@@ -107,6 +108,51 @@ def _recognize_apple(path: Path) -> str:
         return cells_to_csv(json.loads(result.stdout))
     except (subprocess.SubprocessError, ValueError) as exc:
         raise ValueError("Could not read the image. Try a clearer image or upload a CSV.") from exc
+
+
+_TITLE_FOR = re.compile(r"\bfor\s+(\d{1,2})/(\d{1,2})\b", re.IGNORECASE)
+_TITLE_EXP = re.compile(r"(\d{1,2})/(\d{1,2})\s*expiration", re.IGNORECASE)
+_MONTH_DAY = re.compile(r"^\s*(\d{1,2})/(\d{1,2})\s*$")
+
+
+def closest_date(month: int, day: int, today: date) -> date:
+    """The ``month``/``day`` nearest to ``today`` (last year, this year or next)."""
+    options = []
+    for year in (today.year - 1, today.year, today.year + 1):
+        try:
+            options.append(date(year, month, day))
+        except ValueError:
+            continue
+    if not options:
+        raise ValueError(f"{month}/{day} is not a date")
+    return min(options, key=lambda d: abs((d - today).days))
+
+
+def title_dates(text: str, today: date, trade_md: str | None = None,
+                expiration_md: str | None = None) -> tuple[date | None, date | None]:
+    """The list date and expiration from the picture's title, e.g. "FOMC Picks for 9/2"
+    and "9/4 Expiration" (one line or two). Years are the ones nearest ``today``.
+    Either may be None when the title doesn't show it; a person checks both."""
+    lines = []
+    for line in (text or "").splitlines():
+        if "SYMBOL" in line.upper() and "OPTION" in line.upper():
+            break  # the title is above the table
+        lines.append(line)
+    head = "\n".join(lines)
+
+    def pick(given, pattern):
+        m = _MONTH_DAY.match(given or "") or pattern.search(head)
+        if m is None:
+            return None
+        try:
+            return closest_date(int(m.group(1)), int(m.group(2)), today)
+        except ValueError:
+            return None
+
+    trade, expiration = pick(trade_md, _TITLE_FOR), pick(expiration_md, _TITLE_EXP)
+    if trade and expiration and expiration < trade:
+        expiration = expiration.replace(year=expiration.year + 1)
+    return trade, expiration
 
 
 def cells_to_csv(cells: list[dict]) -> str:

@@ -383,7 +383,8 @@ def api_signals():
 @bp.post("/api/signals/upload")
 def api_signals_upload():
     import tempfile
-    from ..imports import recognize_image
+    from ..clock import now_utc, to_market
+    from ..imports import read_image, title_dates
     upload = request.files.get("file")
     if upload is None or not upload.filename:
         return jsonify(error="Choose a CSV, JPEG, or PNG file"), 400
@@ -391,14 +392,20 @@ def api_signals_upload():
     if suffix not in {".csv", ".jpg", ".jpeg", ".png"}:
         return jsonify(error="Choose a CSV, JPEG, or PNG file"), 400
     try:
+        trade_md = expiration_md = None
         if suffix == ".csv":
             text = upload.read().decode("utf-8-sig")
         else:
             with tempfile.TemporaryDirectory(prefix="coopa-image-") as tmp:
                 path = Path(tmp) / ("image" + suffix)
                 upload.save(path)
-                text = recognize_image(path)
-        return jsonify(csv=text, image=suffix != ".csv")
+                read = read_image(path)
+            text, trade_md, expiration_md = read.csv, read.trade_date, read.expiration
+        # Suggested from the title for a person to check; never used without the preview.
+        trade, expiration = title_dates(text, to_market(now_utc()).date(), trade_md, expiration_md)
+        return jsonify(csv=text, image=suffix != ".csv",
+                       date=trade.isoformat() if trade else None,
+                       expiration=expiration.isoformat() if expiration else None)
     except (ValueError, OSError) as exc:
         return jsonify(error=str(exc)), 400
 

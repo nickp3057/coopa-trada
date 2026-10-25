@@ -81,3 +81,36 @@ def test_actual_sample_image_recognition_matches_csv_exactly():
     image = preview_csv(cells_to_csv(cells), "2026-09-02", "2026-09-04")
     reference = preview_csv(CSV, "2026-09-02", "2026-09-04")
     assert image["rows"] == reference["rows"]
+
+
+# -- dates from the picture's title ---------------------------------------------------
+from datetime import date as _date
+
+from coopa_trada.imports import closest_date, title_dates
+
+TODAY = _date(2026, 10, 25)
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("FOMC Picks for 9/2\n9/4 Expiration\nSYMBOL,OPTION", (_date(2026, 9, 2), _date(2026, 9, 4))),   # two lines
+    ("FOMC Picks for 10/27, 10/29 Expiration\nSYMBOL,OPTION", (_date(2026, 10, 27), _date(2026, 10, 29))),
+    ("FOMC Picks for 12/30\n1/2 Expiration\nSYMBOL,OPTION", (_date(2026, 12, 30), _date(2027, 1, 2))),
+    ("Some list\nSYMBOL,OPTION", (None, None)),
+    ("SYMBOL,OPTION\nIBIT,44P for 1/2", (None, None)),                       # only the title counts
+])
+def test_title_dates(text, expected):
+    assert title_dates(text, TODAY) == expected
+
+
+def test_reader_fields_win_and_years_are_the_nearest():
+    assert title_dates("x", TODAY, "9/2", "9/4") == (_date(2026, 9, 2), _date(2026, 9, 4))
+    assert closest_date(1, 3, _date(2026, 12, 30)) == _date(2027, 1, 3)
+    assert title_dates("FOMC Picks for 2/30\n3/1 Expiration", TODAY) == (None, _date(2027, 3, 1))
+
+
+def test_upload_suggests_the_dates_from_the_title(client, monkeypatch):
+    from datetime import datetime, timezone
+    from coopa_trada import clock
+    monkeypatch.setattr(clock, "now_utc", lambda: datetime(2026, 9, 1, 18, tzinfo=timezone.utc))
+    rv = client.post("/api/signals/upload", data={"file": (io.BytesIO(CSV.encode()), "picks.csv")})
+    assert (rv.json["date"], rv.json["expiration"]) == ("2026-09-02", "2026-09-04")

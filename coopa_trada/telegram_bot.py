@@ -43,8 +43,6 @@ API = "https://api.telegram.org"
 PREVIEW_LIFETIME = timedelta(hours=1)
 _MAX_PHOTO_BYTES = 3_700_000
 _IMAGE_TYPES = {"image/png": ".png", "image/jpeg": ".jpg"}
-_TITLE_RE = re.compile(r"for\s+(\d{1,2})/(\d{1,2})\s*,\s*(\d{1,2})/(\d{1,2})\s+expiration", re.IGNORECASE)
-_MD_RE = re.compile(r"^\s*(\d{1,2})/(\d{1,2})\s*$")
 
 
 class TelegramError(RuntimeError):
@@ -108,29 +106,12 @@ def _fmt_day(d: date) -> str:
 
 def _list_dates(read, today: date) -> tuple[date, date]:
     """The list's trade date and expiration, from the reader's answer or the title."""
-    from .models import _resolve_year
-    if read.trade_date and read.expiration:
-        a, b = _MD_RE.match(read.trade_date), _MD_RE.match(read.expiration)
-        if a and b:
-            parts = [int(g) for g in (*a.groups(), *b.groups())]
-        else:
-            parts = None
-    else:
-        parts = None
-    if parts is None:
-        m = next((_TITLE_RE.search(line) for line in [read.title or "", *read.csv.splitlines()[:3]]
-                  if _TITLE_RE.search(line)), None)
-        if m is None:
-            raise ValueError("I could not read the two dates in the title (\"FOMC Picks for M/D, M/D "
-                             "Expiration\"). Nothing was saved. Use the dashboard to enter the dates.")
-        parts = [int(g) for g in m.groups()]
-    try:
-        trade = _resolve_year(parts[0], parts[1], today)
-        expiration = _resolve_year(parts[2], parts[3], today)
-    except ValueError:
-        raise ValueError("The dates in the title are not real dates. Nothing was saved.") from None
-    if expiration < trade:
-        expiration = expiration.replace(year=expiration.year + 1)
+    from .imports import title_dates
+    text = ((read.title or "") + "\n" + read.csv) if read.title else read.csv
+    trade, expiration = title_dates(text, today, read.trade_date, read.expiration)
+    if trade is None or expiration is None:
+        raise ValueError("I could not read the two dates in the title (\"FOMC Picks for M/D\" and "
+                         "\"M/D Expiration\"). Nothing was saved. Use the dashboard to enter the dates.")
     return trade, expiration
 
 
