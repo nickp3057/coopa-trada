@@ -7,6 +7,8 @@ exchange-calendars==4.13.2
 PyYAML==6.0.3
 python-dotenv==1.2.3
 anthropic==2.1.0
+# Login website: QR code for the authenticator-app setup (pure Python).
+segno==1.6.6
 
 # Transitive pins that materially affect behaviour (datetime / calendar math,
 # HTTP client used by schwab-py). Listed explicitly so a fresh install is

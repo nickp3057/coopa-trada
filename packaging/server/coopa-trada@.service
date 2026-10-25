@@ -1,0 +1,24 @@
+# One copy of the bot per person: coopa-trada@cooper, coopa-trada@nick, ...
+# Each has its own folder (@DATA@/<name>: .env, config/rules.yaml, trada.db,
+# schwab_token.json, imports/) and port, and reads no other .env.
+# install.sh fills in @USER@, @DIR@ and @DATA@.
+[Unit]
+Description=Coopa Trada bot for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@DATA@/%i
+EnvironmentFile=@DATA@/%i/.env
+Environment=COOPA_TRADA_ENV_FILE=@DATA@/%i/.env
+Environment=PYTHONUNBUFFERED=1
+# Listens on this machine only; people reach it through the login website.
+ExecStart=@DIR@/.venv/bin/python -m coopa_trada.web --host 127.0.0.1 --port ${COOPA_TRADA_PORT}
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

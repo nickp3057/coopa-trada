@@ -1,0 +1,17 @@
+# The login website (python -m coopa_trada.gateway). Caddy puts HTTPS in front of it.
+[Unit]
+Description=Coopa Trada login website
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+Environment=COOPA_GATEWAY_CONFIG=@DATA@/gateway.yaml
+Environment=PYTHONUNBUFFERED=1
+ExecStart=@DIR@/.venv/bin/python -m coopa_trada.gateway serve --host 127.0.0.1 --port 8780
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

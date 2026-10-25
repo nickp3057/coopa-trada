@@ -47,6 +47,13 @@ def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None
         return app.response_class("Coopa Trada: password required", 401,
                                   {"WWW-Authenticate": 'Basic realm="Coopa Trada"'})
 
+    @app.context_processor
+    def logged_in_user():
+        # Set by the login website (coopa_trada.gateway) in front of this copy; only
+        # believed when the request comes from this machine.
+        user = request.headers.get("X-Coopa-User") if request.remote_addr in ("127.0.0.1", "::1") else None
+        return {"gateway_user": user}
+
     @app.before_request
     def same_origin_writes():
         origin = request.headers.get("Origin")

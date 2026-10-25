@@ -126,7 +126,9 @@ class EngineRunner:
 
             # Today's latest confirmed list (dashboard or Telegram), read on every tick,
             # so confirming picks during the run makes it buy them.
-            source = PickListSource(imports_dir(paths.db_path), fallback=CsvSignalSource(paths.signals_path))
+            from pathlib import Path
+            fallback = CsvSignalSource(paths.signals_path) if Path(paths.signals_path).is_file() else None
+            source = PickListSource(imports_dir(paths.db_path), fallback=fallback)
             engine, store = build_engine(
                 mode=mode,
                 source=source,

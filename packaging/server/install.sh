@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Install or update Coopa Trada as a service on Ubuntu/Debian. Run from the repo
-# folder as the user that will own it (not root):  bash packaging/server/install.sh
-# Safe to run again after `git pull`: it never touches .env, config/rules.yaml,
-# trada.db or schwab_token.json.
+# Install or update Coopa Trada on Ubuntu/Debian. Run from the code folder as the
+# user that will own it (not root):   bash packaging/server/install.sh
+# Safe to run again after `git pull`: it never touches anyone's data folder.
 set -euo pipefail
 DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+DATA="${COOPA_DATA:-$HOME/coopa-data}"
 USER_NAME="$(id -un)"
 cd "$DIR"
 
@@ -15,17 +15,17 @@ fi
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip >/dev/null
 .venv/bin/pip install -r requirements.txt -e '.[web]'
+mkdir -p "$DATA"
+chmod 700 "$DATA"
 
-[ -f config/rules.yaml ] || cp config/rules.example.yaml config/rules.yaml
-if [ ! -f .env ]; then
-  cp .env.example .env
-  chmod 600 .env
-  echo "Created .env from .env.example: fill it in (docs/SERVER_SETUP.md, step 4)."
-fi
-
-sed -e "s#@USER@#${USER_NAME}#g" -e "s#@DIR@#${DIR}#g" packaging/server/coopa-trada.service \
-  | sudo tee /etc/systemd/system/coopa-trada.service >/dev/null
+for unit in coopa-trada@.service coopa-gateway.service; do
+  sed -e "s#@USER@#${USER_NAME}#g" -e "s#@DIR@#${DIR}#g" -e "s#@DATA@#${DATA}#g" "packaging/server/$unit" \
+    | sudo tee "/etc/systemd/system/$unit" >/dev/null
+done
 sudo systemctl daemon-reload
-sudo systemctl enable coopa-trada >/dev/null
-sudo systemctl restart coopa-trada
-echo "Coopa Trada is running. Status: sudo systemctl status coopa-trada   Logs: journalctl -u coopa-trada -f"
+# Restart every person's bot and the login website so they run the new code.
+for folder in "$DATA"/*/; do
+  [ -f "${folder}.env" ] && sudo systemctl restart "coopa-trada@$(basename "$folder")"
+done
+[ -f "$DATA/gateway.yaml" ] && sudo systemctl restart coopa-gateway
+echo "Installed. Add a person with: bash packaging/server/add-person.sh NAME PORT"

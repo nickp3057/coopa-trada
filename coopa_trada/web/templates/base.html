@@ -15,6 +15,7 @@
       <a href="{{ url_for('ui.settings_page') }}" class="{{ 'active' if page == 'settings' }}">Settings</a>
       <a href="{{ url_for('ui.trades_page') }}" class="{{ 'active' if page == 'trades' }}">Trade log</a>
       <a href="{{ url_for('ui.reconcile_page') }}" class="{{ 'active' if page == 'reconcile' }}">Reconcile</a>
+      {% if gateway_user %}<a href="/logout" title="Log out">{{ gateway_user }} &middot; Log out</a>{% endif %}
     </nav>
   </header>
   <main class="container">
