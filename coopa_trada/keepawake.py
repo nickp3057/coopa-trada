@@ -65,6 +65,9 @@ class KeepAwake:
         if self._proc is not None:  # caffeinate ended by itself (killed?): start another
             log.warning("caffeinate exited with %s; restarting it", self._proc.returncode)
             self._proc = None
+        if self.platform.startswith("linux"):
+            self.error = None  # a server does not sleep; nothing to hold
+            return
         if self.platform != "darwin":
             self.error = "Keeping the computer awake is only built for macOS."
             return

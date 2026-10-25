@@ -146,3 +146,14 @@ def test_position_state_rejects_naive_datetimes():
             quantity=1, session_peak_mid=1.0, asset_class=AssetClass.ETF,
             hard_exit_at=HARD_EXIT,
         )
+
+
+def test_a_price_exactly_at_a_trigger_counts():
+    from datetime import datetime, timezone
+    from coopa_trada.exits import PositionState, Quote, StopLoss, TakeProfit, TrailingPeak
+    from coopa_trada.models import AssetClass
+    now = datetime(2026, 9, 2, 19, 50, tzinfo=timezone.utc)
+    pos = PositionState("X", 0.90, now, 1, 2.00, AssetClass.SINGLE_NAME, now)
+    assert TakeProfit(0.60).check(pos, Quote(1.43, 1.45, 1.44), now) is not None   # 0.90 x 1.6
+    assert StopLoss(0.40).check(pos, Quote(0.53, 0.55, 0.54), now) is not None     # 0.90 x 0.6
+    assert TrailingPeak(0.25).check(pos, Quote(1.49, 1.51, 1.50), now) is not None  # 2.00 x 0.75

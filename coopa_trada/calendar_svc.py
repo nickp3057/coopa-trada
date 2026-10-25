@@ -50,12 +50,27 @@ class CalendarService:
 
     # -- derived windows ------------------------------------------------
     def entry_at(self, d: date, minutes_before_close: int) -> datetime:
-        """The instant entries are placed: ``minutes_before_close`` before the close."""
+        """``minutes_before_close`` before the real close (half days included)."""
         return self.session_close(d) - timedelta(minutes=int(minutes_before_close))
+
+    def buy_window(self, d: date, rules) -> tuple[datetime, datetime]:
+        """(earliest buy, no-new-buys cutoff) on ``d``; buys need earliest <= now < cutoff."""
+        open_ = self.session_open(d)
+        earliest = max(self.entry_at(d, rules.earliest_buy_minutes_before_close), open_)
+        return earliest, max(self.entry_at(d, rules.no_new_buys_minutes_before_close), open_)
+
+    def regular_close_time(self) -> time:
+        """The exchange's normal closing time (16:00 for XNYS), from the calendar data."""
+        return self.cal.close_times[-1][1]
 
     def _resolve_endpoint(self, d: date, endpoint: time | int, close: datetime) -> datetime:
         if isinstance(endpoint, time):
-            return datetime.combine(d, endpoint, tzinfo=MARKET_TZ)
+            # Wall-clock times are written for a normal day. On an early close (half
+            # day) they move earlier by the same amount, so "15:35" (25 minutes before
+            # a 16:00 close) becomes 12:35 before a 13:00 close, never after the close.
+            regular = datetime.combine(d, self.regular_close_time(), tzinfo=MARKET_TZ)
+            shift = max(regular - close, timedelta(0))
+            return max(datetime.combine(d, endpoint, tzinfo=MARKET_TZ) - shift, self.session_open(d))
         if isinstance(endpoint, bool):  # bool is an int subclass; reject it explicitly
             raise TypeError("exit-window endpoint must be a time or int, not bool")
         if isinstance(endpoint, int):
@@ -79,6 +94,13 @@ class CalendarService:
         if end < start:
             raise ValueError(f"exit window for {asset_class} ends before it starts")
         return start, end
+
+    def resolve_time(self, d: date, endpoint) -> datetime:
+        """``"open"`` (session open), a ``time`` (New York wall clock) or an ``int``
+        (minutes before the close), on session ``d``."""
+        if endpoint == "open":
+            return self.session_open(d)
+        return self._resolve_endpoint(d, endpoint, self.session_close(d))
 
     # -- holding period ---------------------------------------------------
     def next_session(self, d: date) -> date:

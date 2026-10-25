@@ -17,7 +17,7 @@ from ..models import CsvSignalSource
 from ..store import Store
 from ..wiring import TokenMissing, build_engine, token_status
 from .config import WebPaths
-from .rules_io import RulesValidationError, live_status, read_rules_dict, write_rules
+from .rules_io import RulesValidationError, read_rules_dict, settings_summary, write_rules
 from .runner import EngineRunner, RunnerBusy
 
 bp = Blueprint("ui", __name__)
@@ -109,7 +109,7 @@ def api_run_status():
     snap["live_env_enabled"] = _live_env_enabled()
     snap["live_confirm_phrase"] = LIVE_CONFIRM_PHRASE
     snap["keep_awake"] = current_app.config["COOPA_KEEPAWAKE"].status()
-    snap.update(live_status(_paths().config_path))
+    snap.update(settings_summary(_paths().config_path))
     return jsonify(snap)
 
 
@@ -137,13 +137,9 @@ def api_run_start():
                 ),
                 409,
             )
-        # Early, readable rejection. Engine.run enforces the same gates.
-        status = live_status(_paths().config_path)
-        if status["live_blocked"]:
-            pending = "; ".join(f'{s["label"]} ({s["current"]})' for s in status["unconfirmed_settings"])
-            return jsonify(error=status["live_block_error"] or
-                           f"Live run blocked: unconfirmed settings: {pending}. Confirm them in Settings.",
-                           unconfirmed_settings=status["unconfirmed_settings"]), 409
+        summary = settings_summary(_paths().config_path)
+        if summary["settings_error"]:
+            return jsonify(error=summary["settings_error"]), 409
         token = token_status(config_path=_paths().config_path)
         if token["state"] in ("not_set_up", "expired"):
             return jsonify(error=f'Schwab is {token["label"].lower()}. {token["message"]}'), 409
@@ -429,19 +425,56 @@ def api_signals_preview():
 @bp.post("/api/signals/confirm")
 def api_signals_confirm():
     from itsdangerous import BadSignature
-    from uuid import uuid4
     body = request.get_json(silent=True) or {}
     try:
         preview = _preview_signer().loads(body.get("token", ""), max_age=3600)
     except (BadSignature, TypeError):
         return jsonify(error="Preview expired or changed. Preview the picks again."), 400
+    return jsonify(**confirm_picks(preview["csv"], preview["date"]))
+
+
+def confirm_picks(csv_text: str, trade_date: str) -> dict:
+    """Save a previewed list as the day's confirmed picks (dashboard and Telegram).
+
+    Allowed while a run is active: that run reads confirmed lists on every tick
+    and buys the picks at once if the time is inside the buying window.
+    """
+    from ..picks import save_confirmed_list
     runner = _runner()
     with runner._lock:
-        if runner.status == "running":
-            return jsonify(error="Stop the current run before selecting new picks"), 409
-        directory = Path(_paths().db_path).resolve().parent / "imports"
-        directory.mkdir(parents=True, exist_ok=True)
-        path = directory / f"{preview['date']}-{uuid4().hex}.csv"
-        path.write_text(preview["csv"], encoding="utf-8")
+        path = save_confirmed_list(_paths().db_path, csv_text, trade_date)
         _paths().signals_path = str(path)
-    return jsonify(signals_path=str(path), date=preview["date"], message="Picks selected. Start a dry run when ready.")
+        running = runner.status == "running"
+        mode = "practice" if runner.mode == "DRY-RUN" else "LIVE"
+    if running:
+        message = (f"Picks confirmed. The {mode} run in progress buys them now if it is inside the "
+                   "buying window (and if the run is for this trade date).")
+    else:
+        message = "Picks confirmed. No run is active: start today's run to buy them."
+    return {"signals_path": str(path), "date": trade_date, "message": message, "run_active": running}
+
+
+# -- Telegram intake ----------------------------------------------------
+def _telegram():
+    return current_app.config.get("COOPA_TELEGRAM")
+
+
+@bp.get("/api/telegram")
+def api_telegram():
+    bot = _telegram()
+    if bot is None:
+        return jsonify(configured=False, pending=[],
+                       hint="Telegram is off. Add TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_CHAT_IDS to .env "
+                            "(see docs/TELEGRAM_SETUP.md), then restart the app (or the server's coopa-trada service).")
+    return jsonify(configured=True, allowed_chats=len(bot.allowed), pending=bot.pending_previews(),
+                   ignored_chats=sorted(bot.ignored_chats))
+
+
+@bp.post("/api/telegram/<pid>/<action>")
+def api_telegram_resolve(pid: str, action: str):
+    bot = _telegram()
+    if bot is None or action not in ("confirm", "reject"):
+        return jsonify(error="Not found"), 404
+    outcome = bot.resolve(pid, confirm=action == "confirm", via="dashboard")
+    status = 200 if outcome["ok"] else 409
+    return jsonify(message=outcome["message"], pending=bot.pending_previews()), status

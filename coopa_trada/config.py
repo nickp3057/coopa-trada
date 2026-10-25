@@ -34,6 +34,9 @@ def load_env(dotenv_path: str | os.PathLike[str] | None = None) -> None:
         from dotenv import load_dotenv
     except ImportError:  # pragma: no cover - dotenv is a pinned dependency
         return
+    # On a server running one copy of the bot per person, each copy names its own
+    # file, and no other .env is read, so one person's keys never leak into another's.
+    dotenv_path = dotenv_path or os.environ.get("COOPA_TRADA_ENV_FILE") or None
     if dotenv_path is not None:
         load_dotenv(dotenv_path)
     else:

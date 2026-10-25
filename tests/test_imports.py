@@ -48,11 +48,17 @@ def test_dates_required_and_expiration_cannot_precede_trade_date(client):
         assert client.post("/api/signals/preview", json={"csv": CSV, "date": day, "expiration": exp}).status_code == 400
 
 
-def test_confirm_rejects_tampering_and_changes_during_run(client):
+def test_confirm_rejects_tampering_and_feeds_a_running_run(client):
     assert client.post("/api/signals/confirm", json={"token": "made-up"}).status_code == 400
+    tampered = client.post("/api/signals/preview", json={"csv": CSV, "date": "2026-09-02", "expiration": "2026-09-04"}).json
+    assert client.post("/api/signals/confirm", json={"token": tampered["token"][:-2] + "xx"}).status_code == 400
+    # Task 5: buying is triggered by confirming, so confirming during a run is allowed;
+    # the run reads the new list from imports/ on its next tick.
     preview = client.post("/api/signals/preview", json={"csv": CSV, "date": "2026-09-02", "expiration": "2026-09-04"}).json
     client.application.config["COOPA_RUNNER"].status = "running"
-    assert client.post("/api/signals/confirm", json={"token": preview["token"]}).status_code == 409
+    rv = client.post("/api/signals/confirm", json={"token": preview["token"]})
+    assert rv.status_code == 200 and rv.json["run_active"] is True
+    assert "buys them now" in rv.json["message"]
 
 
 def test_upload_type_size_and_origin_are_checked(client):

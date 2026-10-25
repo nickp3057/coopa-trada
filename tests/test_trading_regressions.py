@@ -12,7 +12,7 @@ from coopa_trada.contracts import SyntheticResolver
 from coopa_trada.engine import Engine
 from coopa_trada.exits import Quote
 from coopa_trada.models import AssetClass, Right, Signal
-from coopa_trada.rules import SETTING_LABELS, FixedQuantitySizer, load_rules
+from coopa_trada.rules import FixedQuantitySizer, load_rules
 from coopa_trada.schwab_token import TokenState, TokenStatus
 from coopa_trada.store import Store
 from coopa_trada.calendar_svc import CalendarService
@@ -70,10 +70,6 @@ class Client:
         return response([])
 
 
-def confirmations(*unconfirmed):
-    return {key: {"confirmed_by_cooper": key not in unconfirmed} for key in SETTING_LABELS}
-
-
 def logged_in(now):
     """A fake Schwab login made at NOW, valid for 7 days."""
     return TokenStatus(TokenState.CONNECTED, "fake", "Logged in to Schwab.",
@@ -81,8 +77,7 @@ def logged_in(now):
 
 
 def engine(store, broker, now=lambda: NOW, sleep=lambda _: None):
-    rules = replace(load_rules("config/rules.example.yaml"), setting_confirmations=confirmations(),
-                    cooper_drop_from_entry_pct=None)
+    rules = replace(load_rules("config/rules.example.yaml"), cooper_drop_from_entry_pct=None)
     return Engine(source=SimpleNamespace(fetch=lambda day: [signal()]),
                   resolver=SyntheticResolver(base_price=1), broker=broker, store=store,
                   rules=rules, cal=CalendarService(), mode=broker.mode,
@@ -173,9 +168,11 @@ def test_delayed_entry_is_monitored_through_exit_fill(store):
         now[0] += timedelta(seconds=_seconds)
         assert now[0].hour < 20, "engine failed to finish before close"
     eng = engine(store, live, now=lambda: now[0], sleep=sleep)
-    # Keep price steady until the hard exit deadline.
+    # Cooper's hold rule: only a take-profit sells on the entry day. The price
+    # reaches it once the delayed entry has filled, so the exit happens today.
     contract = eng.resolver.resolve(signal())
-    eng.quote_source = lambda _: Quote(contract.bid, contract.ask, contract.mid)
+    up = round(contract.ask * 1.7, 2)
+    eng.quote_source = lambda _: Quote(up - .01, up + .01, up)
     eng.run(DAY)
     assert len(client.submitted) == 2
     assert client.submitted[1]["orderLegCollection"][0]["instruction"] == "SELL_TO_CLOSE"
@@ -183,45 +180,45 @@ def test_delayed_entry_is_monitored_through_exit_fill(store):
     assert not store.orders_open("LIVE")
 
 
-def test_cap_uses_ask_and_pending_entries_reserve_slots(store):
+def test_cap_uses_ask_and_pending_entries_reserve_budget(store):
     assert FixedQuantitySizer(100).size(None, SimpleNamespace(mid=.99, ask=1.01), None) == 0
     client = Client()
     eng = engine(store, SchwabBroker(client, "account", store, None))
-    eng.rules = replace(eng.rules, max_concurrent_positions=1)
-    eng.source = SimpleNamespace(fetch=lambda day: [signal(), replace(signal(), id="second", underlying="QQQ")])
+    first, second = signal(), replace(signal(), id="second", underlying="QQQ")
+    asks = [eng.resolver.resolve(s).ask for s in (first, second)]
+    # Room for either pick but not both: the first (still unfilled, WORKING) buy
+    # order reserves its cost, so the second does not fit. (Replaces the old
+    # position-count limit, which Cooper removed.)
+    eng.rules = replace(eng.rules, total_budget=round(sum(asks) * 100 - 0.01, 2), max_dollars_per_position=1000)
+    eng.source = SimpleNamespace(fetch=lambda day: [first, second])
     eng._entry_pass(DAY)
     assert len(client.submitted) == 1
+    assert store.conn.execute("SELECT category FROM skip_events").fetchone()[0] == "budget"
 
 
-@pytest.mark.parametrize("key", list(SETTING_LABELS))
-def test_each_unconfirmed_setting_blocks_live_before_any_broker_call(store, key):
-    client = Client()
-    eng = engine(store, SchwabBroker(client, "account", store, None))
-    eng.rules = replace(eng.rules, setting_confirmations=confirmations(key))
-    with pytest.raises(ValueError, match=f"unconfirmed settings: {SETTING_LABELS[key]}\\."):
-        eng.run(DAY)
-    assert not client.submitted
-    assert not store.conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+def test_old_confirmation_markers_in_a_rules_file_are_ignored(tmp_path):
+    # Settings no longer wait for anyone's sign-off; older files still load.
+    p = tmp_path / "old.yaml"
+    p.write_text(open("config/rules.example.yaml").read()
+                 + "\nsetting_confirmations:\n  spending_cap:\n    confirmed_by_cooper: false\n")
+    assert load_rules(p).total_budget == 300
 
 
-def test_unconfirmed_settings_never_block_dry_run(store):
+def test_dry_run_once_places_the_entry(store):
     eng = engine(store, DryRunBroker(store))
-    eng.rules = replace(eng.rules, setting_confirmations=confirmations(*SETTING_LABELS))
     eng.run(DAY, once=True)
     assert store.conn.execute(
         "SELECT COUNT(*) FROM orders WHERE mode = 'DRY-RUN' AND intent = 'ENTRY'").fetchone()[0] == 1
 
 
-def test_live_rules_and_historical_dates_are_blocked(store):
-    eng = engine(store, SchwabBroker(Client(), "account", store, None))
-    eng.rules = replace(eng.rules, setting_confirmations=confirmations(*SETTING_LABELS))
-    with pytest.raises(ValueError, match="unconfirmed"):
-        eng.run(DAY)
-    eng.rules = replace(eng.rules, setting_confirmations=confirmations())
+def test_live_historical_dates_and_once_are_blocked(store):
+    client = Client()
+    eng = engine(store, SchwabBroker(client, "account", store, None))
     with pytest.raises(ValueError, match="today"):
         eng.run(date(2026, 9, 1))
     with pytest.raises(ValueError, match="continuous monitoring"):
         eng.run(DAY, once=True)
+    assert not client.submitted
 
 
 def test_account_binding_prevents_switching_account(store):
@@ -295,7 +292,7 @@ def test_cancellation_racing_with_a_fill_is_still_exited(store):
             self.canceled = True  # The entry filled just before cancellation reached Schwab.
             return response({}, 200)
     client = RacingClient()
-    now = [NOW.replace(minute=57)]
+    now = [NOW.replace(minute=56)]  # 3:56 PM ET: the last minute before the no-new-buys cutoff
     def sleep(seconds):
         now[0] += timedelta(seconds=seconds)
         assert now[0] <= NOW.replace(hour=20, minute=0)

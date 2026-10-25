@@ -138,10 +138,9 @@ def read_token_status(path: str | Path, now: datetime | None = None) -> TokenSta
 
 
 def fmt_market(dt: datetime) -> str:
-    """``Mon Oct 19, 4:28 PM ET``: how deadlines are shown to a person."""
-    from .clock import to_market
-    m = to_market(dt)
-    return m.strftime("%a %b ") + str(m.day) + m.strftime(", ") + m.strftime("%I:%M %p").lstrip("0") + " ET"
+    """``Mon Oct 19, 2:28 PM MT``: how deadlines are shown to a person (Mountain time)."""
+    from .clock import fmt_display
+    return fmt_display(dt)
 
 
 def hold_needed_until(cal, rules, day) -> datetime:

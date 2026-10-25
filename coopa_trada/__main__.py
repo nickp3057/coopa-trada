@@ -4,6 +4,7 @@
     coopa_trada reconcile [--db P] [--config P]
     coopa_trada resolve   --signals P [--date YYYY-MM-DD]
     coopa_trada unlock    [--db P] [--force-other-host]
+    coopa_trada readonly-check [--symbol SPY]
 
 Every subcommand loads ``.env``, resolves the run mode, and prints the banner.
 """
@@ -59,6 +60,10 @@ def build_parser() -> argparse.ArgumentParser:
     unl.add_argument("--db", default=DEFAULT_DB)
     unl.add_argument("--force-other-host", action="store_true",
                      help="also clear a lock recorded by another computer (shared folders only)")
+
+    chk = sub.add_parser("readonly-check",
+                         help="read-only Schwab check: accounts, balances, positions, one option chain")
+    chk.add_argument("--symbol", default="SPY", help="liquid ticker for the option-chain check")
 
     return p
 
@@ -236,6 +241,23 @@ def cmd_unlock(args) -> int:
     return rc
 
 
+def cmd_readonly_check(args) -> int:
+    """Never places, changes or cancels an order; prints no account numbers or amounts."""
+    from .config import credentials_from_env
+    from .readonly_check import run_check
+
+    try:
+        client, _creds = _schwab_client()
+    except TokenMissing as exc:
+        print(f"[FAILED] Schwab login: {exc}")
+        return 2
+    report = run_check(client, account_id=credentials_from_env().account_id, symbol=args.symbol)
+    print("-- read-only Schwab check (no orders; no account numbers or amounts shown) --")
+    for line in report.lines():
+        print(line)
+    return 0 if report.ok else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     load_env()
@@ -244,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
         "reconcile": cmd_reconcile,
         "resolve": cmd_resolve,
         "unlock": cmd_unlock,
+        "readonly-check": cmd_readonly_check,
     }[args.command]
     from .runlock import RunLocked, StaleLock
 

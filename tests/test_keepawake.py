@@ -49,9 +49,15 @@ def test_caffeinate_is_tied_to_this_process(monkeypatch):
 
 
 def test_off_macos_it_reports_instead_of_holding():
-    awake = KeepAwake(platform="linux")
+    awake = KeepAwake(platform="win32")
     awake.set(True, "x")
     assert FakeCaffeinate.started == [] and "only built for macOS" in awake.status()["error"]
+
+
+def test_on_a_linux_server_there_is_nothing_to_hold_and_no_warning():
+    awake = KeepAwake(platform="linux")
+    awake.set(True, "x")
+    assert FakeCaffeinate.started == [] and awake.status()["error"] is None
 
 
 # -- when it is wanted ---------------------------------------------------------

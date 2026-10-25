@@ -135,6 +135,16 @@ class MixedExpirationsUnsupported(ValueError):
     """
 
 
+def _find_config(path: Path) -> Path:
+    """A relative config path missing from the working folder falls back to the
+    copy shipped with the code (a server data folder needs no copy of it)."""
+    path = Path(path)
+    if path.is_absolute() or path.exists():
+        return path
+    shipped = Path(__file__).resolve().parents[1] / path
+    return shipped if shipped.exists() else path
+
+
 # --------------------------------------------------------------------------
 # Asset-class lookup
 # --------------------------------------------------------------------------
@@ -237,7 +247,7 @@ class CsvSignalSource(SignalSource):
 
     def fetch(self, day: date | None = None) -> list[Signal]:
         text = self.path.read_text(encoding="utf-8")
-        ac_map = load_asset_class_map(self.asset_classes_path)
+        ac_map = load_asset_class_map(_find_config(self.asset_classes_path))
 
         ref = day or clock.to_market(clock.now_utc()).date()
         list_date, expiration = self._parse_header(text, ref)

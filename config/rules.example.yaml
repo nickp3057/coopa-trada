@@ -1,18 +1,39 @@
 # Coopa Trada trading rules. Copy to config/rules.yaml and tune.
 # Every value is validated on load (see coopa_trada/rules.py).
 
-# How long before the session close to place entries. The calendar service
-# turns this into an absolute instant using the real XNYS close for the day
-# (half days included) -- never a hardcoded 16:00.
-entry_minutes_before_close: 20
+# Buying is triggered by confirming the day's picks (Telegram or the
+# dashboard), not by a fixed clock time. Cooper's picks arrive 1:40-1:55 PM
+# Mountain. Buys only happen inside this window, counted back from the real
+# XNYS close (half days included):
+#   earliest_buy_minutes_before_close: no buys before this (a guard against a
+#     list confirmed hours early). 30 = 1:30 PM MT on a normal day.
+#   no_new_buys_minutes_before_close: no buys at or after this. 3 = 1:57 PM MT.
+#
+earliest_buy_minutes_before_close: 30
+no_new_buys_minutes_before_close: 3
+
+# Start the day's run automatically at this Mountain time on trading days, so
+# nobody has to press Start (07:00 MT = 30 minutes before the open). The
+# automatic run is a practice run unless the server's .env has both
+# LIVE_TRADING=1 and AUTO_START_LIVE=1. A run started or stopped by hand that day
+# is left alone. Quote the time.
+auto_start_daily: true
+auto_start_time: "07:00"
 
 # Exit-management window, per asset class. Each endpoint is either:
-#   - "HH:MM"  -> a wall-clock time in America/New_York on the session date, or
+#   - "HH:MM"  -> a wall-clock time in America/New_York on the session date
+#                 (on half days it moves earlier by as much as the close does), or
 #   - an int   -> that many minutes before the real session close.
 # Start and end may mix the two forms.
 exit_window:
   SINGLE_NAME: ["15:35", 2]     # from 3:35pm ET until 2 min before the close
   ETF:         [18, 1]          # from 18 min before close until 1 min before close
+
+# What the exit rules count as the entry price. mid_at_entry: the option's mid
+# (halfway between bid and ask) when it was bought, so a wide bid-ask gap is not
+# an instant loss (bought at a $1.00 ask, $0.80 bid: the rules start from $0.90).
+# fill: the price actually paid. The trade log always shows the real prices.
+exit_reference_price: mid_at_entry
 
 # Trailing stop: exit when mid retraces this fraction from the session peak.
 trailing_stop_pct: 0.25
@@ -23,30 +44,74 @@ hard_stop_loss_pct: 0.40
 # Take profit: exit when mid rises this fraction above the entry price.
 take_profit_pct: 0.60
 
-# DEFAULT, NOT CONFIRMED BY COOPER: peak is the better reading of his wording
-# ("exit at the high", "drops 10% between the times I said"). The observed session
-# peak is always >= entry, so a 10% retrace triggers at a higher price when the
-# peak exceeds entry: it is the earlier, tighter of the two readings.
-# Both fields remain editable. Blank = not wired. If both are set, both are
-# active and the first trigger wins. Keep the standard 25% / 40% / 60% exits
-# alongside these: additional triggers can make an exit earlier, never later.
-cooper_drop_from_peak_pct: 0.10    # DEFAULT, NOT CONFIRMED
+# Older readings of Cooper's "10%" rule, from before his answer. Drop from
+# peak: sell when the mid falls this fraction below its highest. With the
+# 10-point rule below active from entry, its trigger is never higher than the
+# 10-point rule's, so it only matters if the 10-point rule is switched to
+# "once in profit" or off. Blank = off. Drop from entry: a plain stop below
+# the price paid; off by default.
+cooper_drop_from_peak_pct: 0.10
 cooper_drop_from_entry_pct:        # blank = not wired
 
-# Risk caps.
-max_concurrent_positions: 5
-# Spending cap per pick. Always buys exactly 1 contract; if that contract
-# costs more than this, the ticker is skipped entirely.
-# DEFAULT, NOT CONFIRMED BY COOPER -- $300 is a number he mentioned once and
-# never confirmed. Adjust freely.
+# Cooper's 10-point rule (his answer, 2026-10): sell when the profit % drops 10
+# percentage points below its peak profit %. Entry $1.00, peak $2.00 (+100%)
+# -> sell at $1.90 (+90%). Trigger price = peak - points/100 * entry.
+# Alongside every other exit; whichever fires first wins. Blank = off.
+# profit_trail_arm: from_entry (literal reading; before any gain it acts like a
+# -10% stop) or in_profit (only after the price has been above entry).
+#
+profit_trail_points: 10
+profit_trail_arm: from_entry
+
+# Hold logic (Cooper, 2026-10): if the take-profit is reached on the day of
+# entry, sell that day; otherwise hold and roll to the next trading day, where
+# every exit applies and anything still open is sold at the end of that day's
+# exit window. An option expiring on its entry day is sold that day.
+# stops_on_entry_day: true = the stop-type exits (hard stop, trailing stops,
+#   profit-point trail) also protect a position on the day it is bought.
+# held_exit_start: when held positions start being watched the next day:
+#   open | "HH:MM" (New York) | minutes before the close.
+#
+stops_on_entry_day: true
+held_exit_start: open
+# true: anything still open is sold at the end of the next trading day's exit
+# window (held at most one night). false: hold until a rule fires (an option is
+# still sold on its expiration day).
+next_day_time_exit: true
+
+# Cooper: $300 is the TOTAL budget (raise it later if trading is profitable):
+# the most all open positions together may cost, including ones held from
+# earlier days and buy orders still working, checked at ask x 100. There is no
+# limit on the number of positions. Picks are ranked by |delta| (highest first)
+# and bought in that order while each still fits; a pick that does not fit is
+# skipped and logged, and cheaper picks after it are still considered.
+# rank_delta_source: schwab_live (Schwab's option chain at buying time) or tvt
+# (the list's TVT-DELTA column).
+total_budget: 300
+rank_delta_source: schwab_live
+
+# Per-pick cap ($300): if the contracts for one pick (contracts_per_pick) cost
+# more than this at the ask x 100, the pick is skipped entirely.
 max_dollars_per_position: 300
+# Contracts bought per pick (the per-pick cap and the budget count them all).
+contracts_per_pick: 1
+
+# Exit repricing (Cooper: if a sell doesn't fill in 1 minute, reprice it to the
+# current price). A real sell order still unfilled after
+# exit_reprice_after_seconds is canceled and, once Schwab confirms the cancel,
+# replaced with a limit order at the current bid for whatever is still held.
+# Never a market order. After exit_reprice_max_attempts replacements, a person
+# is alerted (Mac + phone) and the last order is left working. 0 = off.
+# Only lowers the price: if the bid is not below the working order's price, it
+# waits.
+exit_reprice_after_seconds: 60
+exit_reprice_max_attempts: 5
 
 # Exit loop cadence.
 poll_interval_seconds: 30
 
 # Delta filtering. Off by default -- we assume Cooper's source already screens
 # on delta and sends only the picks it wants traded.
-# DEFAULT, NOT CONFIRMED BY COOPER.
 # This is a curated pick list from a paid service. The delta columns almost
 # certainly document upstream picks; filtering here would discard paid-for picks.
 # TVT-DELTA appears on a 0-100 scale, unlike Schwab's 0-1. For source: tvt,
@@ -56,16 +121,3 @@ delta_filter:
   source: schwab          # "schwab" | "tvt" -- which column to read
   min_abs_delta: 0.30     # inclusive; ignored while enabled: false
   max_abs_delta: 0.80     # inclusive; ignored while enabled: false
-
-# Cooper-confirmation markers. Any false marker BLOCKS live runs (dry runs are
-# never blocked); Engine.run enforces this for both the CLI and the web UI.
-# Set them here or with the Confirm checkboxes in Settings. Changing a
-# confirmed setting's value in Settings resets its marker unless the same save
-# re-confirms it.
-setting_confirmations:
-  spending_cap:
-    confirmed_by_cooper: false
-  ten_percent_stop:
-    confirmed_by_cooper: false
-  delta_filter:
-    confirmed_by_cooper: false

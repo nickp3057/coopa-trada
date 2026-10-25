@@ -176,8 +176,11 @@ def test_cooper_10pct_keys_wire_extra_exit_strategies_first(store, tmp_path):
     first, second = eng.composite.strategies[0], eng.composite.strategies[1]
     assert isinstance(first, StopLoss) and first.pct == 0.10
     assert isinstance(second, TrailingPeak) and second.pct == 0.10
-    # originals still present after the two prepended strategies
-    assert len(eng.composite.strategies) == 6
+    # originals still present after the two prepended strategies, plus Cooper's
+    # profit-point trail (on by default)
+    from coopa_trada.exits import ProfitPointTrail
+    assert len(eng.composite.strategies) == 7
+    assert sum(isinstance(s, ProfitPointTrail) for s in eng.composite.strategies) == 1
 
 
 def test_cooper_10pct_keys_are_optional(rules):
@@ -187,12 +190,23 @@ def test_cooper_10pct_keys_are_optional(rules):
 
 
 def test_exit_loop_triggers_hard_time_exit_when_clock_is_past_window(store, rules):
+    # Cooper's hold rule: without a take-profit the position is held on its entry
+    # day, then the time exit sells it at the end of the next trading day's window.
     sig = _signal("sig-1", "AAPL", 250.0, 3)
     # 20:30 UTC = 16:30 ET, past the SINGLE_NAME exit window end
     now = datetime(2026, 9, 2, 20, 30, tzinfo=UTC)
-    eng = _engine(store, rules, [sig], now=now)
-    eng.run(DAY, once=False)
+    _engine(store, rules, [sig], now=now).run(DAY, once=False)
+    intents = [o["intent"] for o in store.conn.execute("SELECT intent FROM orders ORDER BY id")]
+    assert intents == ["ENTRY"]
+    assert [r["signal_id"] for r in store.open_positions()] == ["sig-1"]  # held overnight
 
+    next_day = date(2026, 9, 3)
+    eng = _engine(store, rules, [], now=datetime(2026, 9, 3, 20, 30, tzinfo=UTC))
+    held = store.open_positions()[0]
+    flat = SyntheticQuoteSource(drift_per_tick=0)  # price unchanged: only the time exit fires
+    flat.register(held["osi_symbol"], held["entry_price"])
+    eng.quote_source = flat
+    eng.run(next_day, once=False)
     intents = [o["intent"] for o in store.conn.execute("SELECT intent FROM orders ORDER BY id")]
     assert intents == ["ENTRY", "EXIT"]
     ev = store.conn.execute("SELECT * FROM exit_events").fetchone()

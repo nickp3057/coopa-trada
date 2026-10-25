@@ -1,7 +1,6 @@
 "use strict";
 // Settings: load rules into the form, save with inline validation messages.
-// Delta bounds and confirmation markers are validated server-side by the same
-// code that loads rules.yaml.
+// Every value is validated server-side by the same code that loads rules.yaml.
 
 const form = document.getElementById("rules-form");
 const msg = document.getElementById("rules-msg");
@@ -11,27 +10,19 @@ const noteEl = document.getElementById("ambiguous-note");
 const ewRows = document.getElementById("exit-window-rows");
 
 const PCT_OR_INT_FIELDS = [
-  "entry_minutes_before_close", "poll_interval_seconds",
+  "earliest_buy_minutes_before_close", "no_new_buys_minutes_before_close", "poll_interval_seconds",
   "trailing_stop_pct", "hard_stop_loss_pct", "take_profit_pct",
-  "max_concurrent_positions", "max_dollars_per_position",
+  "total_budget", "max_dollars_per_position",
+  "exit_reprice_after_seconds", "exit_reprice_max_attempts", "contracts_per_pick",
   "cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct",
+  "profit_trail_points",
 ];
+const TEXT_FIELDS = ["profit_trail_arm", "held_exit_start", "rank_delta_source", "exit_reference_price",
+  "auto_start_time"];
+const BOOL_FIELDS = ["stops_on_entry_day", "auto_start_daily", "next_day_time_exit"];
 const DELTA_NUMBERS = ["min_abs_delta", "max_abs_delta"];
 
 let saved = null; // last response from the server
-
-function renderConfirmations(data) {
-  for (const item of data.default_settings || []) {
-    const row = form.querySelector(`[data-confirm-key="${item.key}"]`);
-    if (!row) continue;
-    const ok = item.confirmed_by_cooper;
-    const badge = row.querySelector("[data-badge]");
-    badge.textContent = ok ? "Confirmed" : "Unconfirmed";
-    badge.className = "badge " + (ok ? "badge-ok" : "badge-warn");
-    badge.title = ok ? "" : "Blocks live runs until confirmed. Current: " + item.current;
-    form.elements["confirm_" + item.key].checked = ok;
-  }
-}
 
 function fillDelta(delta) {
   form.elements.delta_enabled.checked = !!delta.enabled;
@@ -68,9 +59,18 @@ function fill(data) {
     const v = data[name];
     input.value = v === null || v === undefined ? "" : v;
   }
+  for (const name of TEXT_FIELDS) {
+    if (form.elements[name] && data[name] != null) form.elements[name].value = data[name];
+  }
+  for (const name of BOOL_FIELDS) {
+    if (form.elements[name]) form.elements[name].checked = !!data[name];
+  }
+  const holdNote = document.getElementById("hold-note");
+  if (holdNote) holdNote.textContent = data.hold_note || "";
+  const trailNote = document.getElementById("profit-trail-note");
+  if (trailNote) trailNote.textContent = data.profit_trail_note || "";
   renderExitWindow(data.exit_window || {});
   fillDelta(data.delta_filter || {});
-  renderConfirmations(data);
 }
 
 function collect() {
@@ -79,6 +79,12 @@ function collect() {
     const input = form.elements[name];
     if (!input) continue;
     payload[name] = input.value === "" ? null : Number(input.value);
+  }
+  for (const name of TEXT_FIELDS) {
+    if (form.elements[name]) payload[name] = form.elements[name].value;
+  }
+  for (const name of BOOL_FIELDS) {
+    if (form.elements[name]) payload[name] = form.elements[name].checked;
   }
   const ew = {};
   ewRows.querySelectorAll("input[data-ew]").forEach((inp) => {
@@ -91,10 +97,6 @@ function collect() {
   for (const name of DELTA_NUMBERS) {
     const raw = form.elements["delta_" + name].value;
     payload.delta_filter[name] = raw === "" ? null : Number(raw);
-  }
-  payload.setting_confirmations = {};
-  for (const item of (saved && saved.default_settings) || []) {
-    payload.setting_confirmations[item.key] = { confirmed_by_cooper: form.elements["confirm_" + item.key].checked };
   }
   return payload;
 }
@@ -113,15 +115,9 @@ form.addEventListener("submit", async (ev) => {
   const payload = collect();
   const { ok, body } = await CT.post("/api/rules", payload);
   if (ok) {
-    // A ticked box that comes back false was reset because its value changed.
-    const reset = (body.default_settings || []).filter((item) =>
-      payload.setting_confirmations[item.key] &&
-      payload.setting_confirmations[item.key].confirmed_by_cooper && !item.confirmed_by_cooper);
     fill(body);
-    msg.textContent = "Saved and reloaded." + (reset.length
-      ? " Confirmation reset because the value changed: " + reset.map((i) => i.label).join(", ") + ". Re-confirm with Cooper."
-      : "");
-    msg.className = reset.length ? "msg warn" : "msg ok";
+    msg.textContent = "Saved and reloaded.";
+    msg.className = "msg ok";
   } else {
     msg.textContent = body.error || "save rejected";
     msg.className = "msg is-error";

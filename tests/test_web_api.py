@@ -91,51 +91,16 @@ def test_get_rules_returns_current_values(client):
     assert body["delta_filter"] == {
         "enabled": False, "source": "schwab", "min_abs_delta": 0.30, "max_abs_delta": 0.80,
     }
-    assert [s["key"] for s in body["default_settings"] if not s["confirmed_by_cooper"]] == [
-        "spending_cap", "ten_percent_stop", "delta_filter",
-    ]
+    assert "setting_confirmations" not in body and "default_settings" not in body
 
 
-def _confirm(*keys):
-    return {key: {"confirmed_by_cooper": key in keys}
-            for key in ("spending_cap", "ten_percent_stop", "delta_filter")}
-
-
-def test_confirm_checkbox_persists_marker(client, paths):
+def test_saving_drops_old_confirmation_markers(client, paths):
+    with open(paths.config_path, "a") as f:
+        f.write("\nsetting_confirmations:\n  spending_cap:\n    confirmed_by_cooper: false\n")
     good = client.get("/api/rules").get_json()
-    rv = client.post("/api/rules", json={**good, "setting_confirmations": _confirm("spending_cap")})
-    assert rv.status_code == 200
-    markers = load_rules(paths.config_path).setting_confirmations
-    assert markers["spending_cap"]["confirmed_by_cooper"] is True
-    assert markers["delta_filter"]["confirmed_by_cooper"] is False
-
-
-def test_changing_confirmed_value_resets_its_marker_only(client, paths):
-    good = client.get("/api/rules").get_json()
-    client.post("/api/rules", json={**good, "setting_confirmations": _confirm("spending_cap", "delta_filter")})
-    good = client.get("/api/rules").get_json()
-    rv = client.post("/api/rules", json={**good, "max_dollars_per_position": 250})
-    markers = rv.get_json()["setting_confirmations"]
-    assert markers["spending_cap"]["confirmed_by_cooper"] is False
-    assert markers["delta_filter"]["confirmed_by_cooper"] is True
-
-
-def test_value_change_with_fresh_confirmation_stays_confirmed(client):
-    good = client.get("/api/rules").get_json()
-    rv = client.post("/api/rules", json={
-        **good, "max_dollars_per_position": 250, "setting_confirmations": _confirm("spending_cap"),
-    })
-    assert rv.get_json()["setting_confirmations"]["spending_cap"]["confirmed_by_cooper"] is True
-
-
-def test_post_rules_rejects_malformed_confirmation(client, paths):
-    good = client.get("/api/rules").get_json()
-    before = open(paths.config_path).read()
-    rv = client.post("/api/rules", json={
-        **good, "setting_confirmations": {"spending_cap": {"confirmed_by_cooper": "yes"}},
-    })
-    assert rv.status_code == 400
-    assert open(paths.config_path).read() == before
+    assert client.post("/api/rules", json={**good, "max_dollars_per_position": 250}).status_code == 200
+    text = open(paths.config_path).read()
+    assert "confirmed_by_cooper" not in text and load_rules(paths.config_path).max_dollars_per_position == 250
 
 
 def test_delta_filter_saves_through_settings(client, paths):
@@ -240,30 +205,24 @@ def test_live_start_blocked_without_env_optin(client, monkeypatch):
     assert "LIVE_TRADING" in rv.get_json()["error"]
 
 
-def test_live_start_blocked_and_listed_while_settings_unconfirmed(client, monkeypatch):
+def test_status_lists_the_current_settings_in_plain_words(client, monkeypatch):
     monkeypatch.setenv("LIVE_TRADING", "1")
     status = client.get("/api/run/status").get_json()
-    assert status["live_blocked"] is True
-    assert [s["label"] for s in status["unconfirmed_settings"]] == [
-        "spending cap", "10% stop basis", "delta filter",
-    ]
-    assert "$1500" in status["unconfirmed_settings"][0]["current"]
-    rv = client.post(
-        "/api/run/start", json={"live": True, "confirm": "ENABLE LIVE TRADING"}
-    )
-    assert rv.status_code == 409
-    assert "unconfirmed settings" in rv.get_json()["error"]
+    assert status["settings_error"] is None
+    summary = {s["label"]: s["current"] for s in status["settings_summary"]}
+    assert "costs more than $1500" in summary["Per-pick cap"]
+    assert "$300 for all open positions" in summary["Total budget"]
+    # Live is still refused, now because there is no Schwab login in the test.
+    rv = client.post("/api/run/start", json={"live": True, "confirm": "ENABLE LIVE TRADING"})
+    assert rv.status_code == 409 and "Schwab" in rv.get_json()["error"]
     assert client.get("/api/run/status").get_json()["status"] == "idle"
 
 
-def test_live_status_clears_once_all_confirmed(client):
-    good = client.get("/api/rules").get_json()
-    client.post("/api/rules", json={
-        **good, "setting_confirmations": _confirm("spending_cap", "ten_percent_stop", "delta_filter"),
-    })
-    status = client.get("/api/run/status").get_json()
-    assert status["live_blocked"] is False
-    assert status["unconfirmed_settings"] == []
+def test_a_broken_rules_file_blocks_live_with_a_plain_message(client, paths, monkeypatch):
+    monkeypatch.setenv("LIVE_TRADING", "1")
+    open(paths.config_path, "a").write("\ntotal_budget: -5\n")
+    rv = client.post("/api/run/start", json={"live": True, "confirm": "ENABLE LIVE TRADING"})
+    assert rv.status_code == 409 and "total_budget" in rv.get_json()["error"]
 
 
 def test_double_start_is_rejected_while_running(client, monkeypatch):

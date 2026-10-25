@@ -29,29 +29,24 @@ let confirmPhrase = "ENABLE LIVE TRADING";
 let lastStatus = null;
 
 function liveAllowed(s) {
-  return s.status !== "running" && !!s.live_env_enabled && !s.live_blocked &&
+  return s.status !== "running" && !!s.live_env_enabled && !s.settings_error &&
     liveConfirm.value === confirmPhrase;
 }
 
 function renderLiveSettings(s) {
   if (!liveSettings) return;
   liveSettings.replaceChildren();
-  liveSettings.className = "status-line " + (s.live_blocked ? "is-error" : "ok");
-  if (s.live_block_error) {
-    liveSettings.textContent = "Live runs are blocked. " + s.live_block_error;
+  if (s.settings_error) {
+    liveSettings.className = "status-line is-error";
+    liveSettings.textContent = "Runs are blocked: " + s.settings_error;
     return;
   }
-  if (!s.live_blocked) {
-    liveSettings.textContent = "All settings are confirmed with Cooper.";
-    return;
-  }
-  liveSettings.append(
-    "Live runs are blocked: these settings are not confirmed with Cooper. ",
-    CT.el("a", { href: "/settings", text: "Confirm them in Settings." }),
-  );
+  liveSettings.className = "status-line";
+  liveSettings.append("A run trades with these settings (change them in ",
+    CT.el("a", { href: "/settings", text: "Settings" }), "):");
   const list = CT.el("ul", { class: "live-blockers" });
-  for (const item of s.unconfirmed_settings) {
-    list.append(CT.el("li", { text: item.label + " (currently " + item.current + ")" }));
+  for (const item of s.settings_summary || []) {
+    list.append(CT.el("li", { text: item.label + ": " + item.current }));
   }
   liveSettings.append(list);
 }
@@ -66,6 +61,7 @@ function renderStatus(s) {
 
   let txt = running ? "RUNNING" : "idle";
   if (running && s.last_started) txt += " since " + CT.fmtTime(s.last_started);
+  if (running && s.activity) txt += " · " + s.activity;
   if (!running && s.last_finished) {
     txt += " · last run " + CT.fmtTime(s.last_finished);
     if (s.last_result) txt += " (" + s.last_result + ")";
@@ -125,7 +121,7 @@ function fmtRemaining(ms) {
 function renderCountdown() {
   if (!tokenExpiresAt) { schwabCountdown.textContent = ""; return; }
   schwabCountdown.textContent = "Login expires in " + fmtRemaining(tokenExpiresAt - Date.now()) +
-    " (" + tokenExpiresAt.toLocaleString() + ")";
+    " (" + CT.fmtTime(tokenExpiresAt) + ")";
 }
 
 async function loadToken() {

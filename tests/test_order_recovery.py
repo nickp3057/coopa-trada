@@ -206,6 +206,9 @@ def test_entry_pass_continues_after_unknown_and_skips_halted_contract(store):
     eng = engine(store, broker_for(client, store))
     second = replace(signal(), id="second", underlying="QQQ")
     eng.source = SimpleNamespace(fetch=lambda day: [signal(), second])
+    # The unknown order reserves its cost in the total budget (it may be live at
+    # Schwab); give room for both so the test isolates "the pass continues".
+    eng.rules = replace(eng.rules, total_budget=10_000)
     original = client.place_order
 
     def fail_first_only(account, spec):

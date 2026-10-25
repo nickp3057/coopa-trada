@@ -24,9 +24,16 @@ __all__ = [
     "HardTimeExit",
     "StopLoss",
     "TakeProfit",
+    "ProfitPointTrail",
+    "PROFIT_TRAIL_ARMS",
     "CompositeExit",
     "update_peak",
 ]
+
+
+# Float tolerance so a price exactly at a trigger counts as reaching it
+# (0.90 x 1.6 is 1.4400000000000002 in floating point; a $1.44 mid must count).
+_EPS = 1e-9
 
 
 @dataclass(frozen=True)
@@ -91,7 +98,7 @@ class TrailingPeak:
 
     def check(self, pos: PositionState, quote: Quote, now: datetime) -> ExitDecision | None:
         trigger = pos.session_peak_mid * (1 - self.pct)
-        if quote.mid <= trigger:
+        if quote.mid <= trigger + _EPS:
             return ExitDecision(
                 strategy="TrailingPeak",
                 reason=f"mid {quote.mid:.4f} <= peak {pos.session_peak_mid:.4f} * (1 - {self.pct})",
@@ -134,7 +141,7 @@ class StopLoss:
 
     def check(self, pos: PositionState, quote: Quote, now: datetime) -> ExitDecision | None:
         trigger = pos.entry_price * (1 - self.pct)
-        if quote.mid <= trigger:
+        if quote.mid <= trigger + _EPS:
             return ExitDecision(
                 strategy="StopLoss",
                 reason=f"mid {quote.mid:.4f} <= entry {pos.entry_price:.4f} * (1 - {self.pct})",
@@ -155,7 +162,7 @@ class TakeProfit:
 
     def check(self, pos: PositionState, quote: Quote, now: datetime) -> ExitDecision | None:
         trigger = pos.entry_price * (1 + self.pct)
-        if quote.mid >= trigger:
+        if quote.mid >= trigger - _EPS:
             return ExitDecision(
                 strategy="TakeProfit",
                 reason=f"mid {quote.mid:.4f} >= entry {pos.entry_price:.4f} * (1 + {self.pct})",
@@ -164,6 +171,59 @@ class TakeProfit:
                 meta={"entry_price": pos.entry_price, "trigger": round(trigger, 4), "pct": self.pct},
             )
         return None
+
+
+PROFIT_TRAIL_ARMS = ("from_entry", "in_profit")
+
+
+class ProfitPointTrail:
+    """Cooper's rule: sell when the profit % falls ``points`` percentage points
+    below its peak profit %.
+
+    profit % = (mid - entry) / entry * 100. With entry $1.00 and peak $2.00
+    (peak profit +100%), 10 points means selling at +90%, i.e. mid <= $1.90.
+    In prices: trigger = peak - points/100 * entry. The drop is measured in
+    points of the *entry* price, not as a percentage of the peak.
+
+    ``arm``:
+      * ``"from_entry"`` (literal reading): active from the moment of entry. The
+        peak starts at the entry price, so before any gain it acts as a
+        -``points``% stop (entry $1.00 -> sells at $0.90).
+      * ``"in_profit"``: active only once the peak has been above the entry
+        price (the position has been in profit at least once).
+    """
+
+    def __init__(self, points: float, arm: str = "from_entry"):
+        if not 0 < points < 100:
+            raise ValueError("ProfitPointTrail points must be in (0, 100)")
+        if arm not in PROFIT_TRAIL_ARMS:
+            raise ValueError(f"ProfitPointTrail arm must be one of {PROFIT_TRAIL_ARMS}")
+        self.points = points
+        self.arm = arm
+
+    def trigger(self, pos: PositionState) -> float | None:
+        """The mid at or below which this exit fires, or None while unarmed."""
+        peak = max(pos.session_peak_mid, pos.entry_price)
+        if self.arm == "in_profit" and peak <= pos.entry_price:
+            return None
+        return peak - self.points / 100 * pos.entry_price
+
+    def check(self, pos: PositionState, quote: Quote, now: datetime) -> ExitDecision | None:
+        trigger = self.trigger(pos)
+        if trigger is None or quote.mid > trigger + _EPS:
+            return None
+        peak = max(pos.session_peak_mid, pos.entry_price)
+        peak_pct = (peak / pos.entry_price - 1) * 100
+        now_pct = (quote.mid / pos.entry_price - 1) * 100
+        return ExitDecision(
+            strategy="ProfitPointTrail",
+            reason=(f"profit {now_pct:+.1f}% is {peak_pct - now_pct:.1f} points below peak profit "
+                    f"{peak_pct:+.1f}% (limit {self.points:g} points)"),
+            price=quote.bid,
+            at=now,
+            meta={"entry_price": pos.entry_price, "peak": peak, "trigger": round(trigger, 4),
+                  "points": self.points, "arm": self.arm},
+        )
 
 
 class CompositeExit:

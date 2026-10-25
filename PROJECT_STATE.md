@@ -1,144 +1,194 @@
 # Project state — Coopa Trada
 
-_Last updated: 2026-10-16_
+_Last updated: 2026-10-26_
 
-Local Python/Flask app for Cooper's FOMC Picks, packaged as a double-click macOS
-app. CSV and macOS image upload feed an editable preview, explicit dates, and a
-separate confirmation step. Uploading or confirming a list never starts trading.
-Simulation remains the default. **Nick's real Schwab login has now worked once from
-source** (Reconnect Schwab → paste the redirect address → dashboard shows
-Connected). No other real Schwab call (quotes, accounts, orders) has been made, and
-no live order has ever been placed.
+Python/Flask app that trades Cooper's daily FOMC option picks through Schwab. It runs
+as a double-click macOS app or as a service on a Linux server
+(docs/SERVER_SETUP.md). Picks arrive as screenshots by Telegram (or dashboard upload),
+are read by Claude (or Apple Vision on a Mac), previewed, and bought on confirmation.
+Every trading choice is an ordinary setting with a working default; nothing waits
+for sign-off. Simulation remains the default and **no live order has ever been
+placed**. The only real Schwab request so far is still Nick's login (2026-10-16).
 
-## Session summary (2026-10-16, second session)
+The plain-English rulebook, with dollar examples and every setting, is
+**`docs/HOW_IT_TRADES.md`**.
 
-All merged into `master` (fast-forward) and the task branches deleted.
+## Session summary (2026-10-25)
 
-- **Login must outlast the hold:** runs refuse to start unless the Schwab login
-  lasts through the next trading day's exit window (+30 min). Checked at start and at
-  entry time; the dashboard turns red when the login won't cover the next run.
-- **Alerts:** Mac notifications (always on) and optional ntfy phone push
-  (`NTFY_TOPIC`), scrubbed of account numbers, IDs, links and dollar amounts.
-  Settings → Send test alert. Background watchdog for conditions outside a run.
-- **Keep the Mac awake:** `caffeinate -i -s` while a run is active or a live
-  position/order is open; Dashboard shows "Keeping Mac awake".
-- **`docs/SCHWAB_SETUP.md`:** Developer Portal / `.env` checklist, which login decides
-  the account, first-login walkthrough, and the points the source can't confirm.
-- **Rebuilt** `dist/Coopa Trada.app`; `packaging/verify_app.py --app` passed.
-- **Real login:** Nick's own Schwab login completed from source with
-  `python -m coopa_trada.web` and the repo-root `.env`; the token file is
-  `schwab_token.json` in the repo root (git-ignored, like `.env`).
+On `claude/gracious-einstein-a30t1n`, one commit each (373 tests passing):
+
+- **Cooper confirmation checks removed** (`b45ef1d`). Settings are plain settings;
+  the dashboard's live panel lists them in plain words. Live runs still need
+  `LIVE_TRADING=1`, the typed phrase (or `AUTO_START_LIVE=1`), a valid rules file
+  and a Schwab login covering the hold. Old `setting_confirmations` blocks are ignored.
+- **Spread fix** (`b66e116`): `exit_reference_price` (default `mid_at_entry`) makes
+  the exit rules measure from the mid at purchase, so a wide bid–ask gap is not an
+  instant loss. Price triggers count an exact hit (float tolerance).
+- **Automatic daily start** (`50f1c12`): 7:00 AM MT on trading days; practice unless
+  `LIVE_TRADING=1` and `AUTO_START_LIVE=1`; a run started or stopped by hand that day is
+  left alone; one attempt per day.
+- **Server-ready** (`efcc10f`): `DASHBOARD_PASSWORD` (HTTP login, required off
+  127.0.0.1), Tailscale-proxy-safe origin check, quiet keep-awake on Linux, calendar
+  expiry warning 60 days ahead, `packaging/server/` (systemd unit, install script
+  tested in a scratch copy), `docs/SERVER_SETUP.md`.
+- **Last open questions as settings** (`1197daf`): `next_day_time_exit` (sell at the
+  end of the next day; default yes) and `contracts_per_pick` (default 1).
+- Docs: HOW_IT_TRADES has a full settings table instead of questions; COOPER_README
+  and README describe the automatic start and server use.
+
+**Multi-person website** (`fa02222`): one bot per person (`coopa-trada@NAME`, own
+data folder, `.env`, Schwab login, settings, trade log, Telegram bot) behind
+`coopa_trada.gateway` (password + TOTP 2FA, lockout, 12-hour signed session), HTTPS by
+Caddy on a free DuckDNS name. Verified end to end with two bots and curl.
+
+Hosting: a 1 GB Linux server (AWS Lightsail, DigitalOcean, Hetzner), about $5–12 a
+month, on 24/7, reached privately over Tailscale.
+
+## Session summary (2026-10-22): Cooper's rules
+
+One branch and one commit per task, stacked in order (each branch contains the
+ones before it); `claude/gracious-einstein-a30t1n` was fast-forwarded to the last one.
+Nothing was pushed. **249 tests at the start, 360 at the end, all passing.**
+
+| Task | Branch | Commit | Status |
+|---|---|---|---|
+| 0 Read-only Schwab check | `task-0-readonly-check` | `370542c` | Partial: tool built and tested; **not run against Schwab** (this cloud container has no `schwab_token.json` or `.env`) |
+| 1 Profit-point trailing exit | `task-1-profit-trail` | `0cdc0d4` | Done |
+| 2 Hold logic | `task-2-hold-logic` | `8187f5c` | Done |
+| 3 Sizing (budget, delta rank) | `task-3-sizing` | `52b8c42` | Done |
+| 4 Exit repricing | `task-4-exit-repricing` | `fb09d43` | Done |
+| 5 Entry timing, half-day fix, MT | `task-5-entry-timing` | `fb5024a` | Done |
+| 6 Claude picture reader | `task-6-claude-reader` | `d3b46c6` | Done (API mocked; never called for real) |
+| 7 Telegram intake | `task-7-telegram` | `60e8cdb` | Done (Bot API mocked; never called for real) |
+| 8 Rule sheet + this file | `task-8-docs` | (this commit) | Done |
+
+What changed, briefly:
+
+- **Read-only check:** `python -m coopa_trada readonly-check [--symbol SPY]` calls only
+  `get_account_numbers`, `get_account` and `get_option_chain` through a wrapper that
+  refuses every other method (order methods included) and prints counts and yes/no
+  answers, never account numbers, hashes or amounts.
+- **10-point rule:** `ProfitPointTrail` sells when profit % falls `profit_trail_points`
+  (10) points below peak profit % (trigger = peak − 0.10 × entry; $1 → $2 peak → $1.90).
+  `profit_trail_arm`: `from_entry` (default) or `in_profit`.
+- **Hold logic:** entry day = only take-profit (plus stops when `stops_on_entry_day`,
+  default yes); otherwise held overnight and the run ends cleanly. Next trading day:
+  every exit from `held_exit_start` (default the open) and the time exit at that
+  day's window end. Options expiring on their entry day are never held; overdue
+  positions are sold at the start of monitoring. Orders record their `trading_day`.
+- **Sizing:** `total_budget` ($300) over all open positions and working buys (held
+  ones included), counted at max(limit, fill) × 100, rounded up to the cent;
+  `max_concurrent_positions` removed; picks ranked by |delta| (`rank_delta_source`:
+  `schwab_live` default, or `tvt`), bought while each fits; every skip recorded.
+- **Exit repricing:** a real sell unfilled after 60 s is canceled; only after Schwab
+  reports CANCELED is a LIMIT order sent at the current bid for what is still held,
+  at most 5 times, then an alert (Mac + ntfy). Only ever lowers the price.
+- **Entry timing:** buys when picks are confirmed, inside 1:30–1:57 PM MT
+  (`earliest_buy_minutes_before_close` 30, `no_new_buys_minutes_before_close` 3,
+  relative to the real close, so half days move). Confirmed lists are files in
+  `imports/`; the latest per trade date wins; a running run picks them up each tick.
+- **Half-day bug fixed:** wall-clock window times shift earlier on early-close days.
+- **Mountain time** everywhere a person reads a time (UI, login messages, alerts).
+- **Claude reader** (`coopa_trada/vision.py`): Claude Opus 5.5, strict JSON schema,
+  server-side refusal fallback; default off the Mac; same preview + confirm.
+- **Telegram** (`coopa_trada/telegram_bot.py`, `docs/TELEGRAM_SETUP.md`): forward
+  screenshot → preview with Confirm/Reject (also on the dashboard); allowed chat IDs only.
+
+## Decisions made (conservative option on each ambiguity)
+
+1. **Task 0 could not run here**: no Schwab login in the cloud container. Built the
+   read-only command instead; Nick runs it on his Mac.
+2. Exit rules keep judging on the **mid**; the 10-point rule fires **at** exactly 10
+   points (inclusive).
+3. **The old 10%-from-peak exit stays on** (never weaken a safety check). It is
+   redundant with the 10-point rule in `from_entry` mode; Cooper is asked whether to
+   remove it.
+4. **One overnight hold at most**: on the next trading day the time exit sells at the
+   window end (matches the existing login-hold check). Overdue positions are sold at
+   the start of monitoring.
+5. **Next-day exits start at the open** (protection all day) rather than the
+   afternoon window; setting `held_exit_start`.
+6. An option **expiring on its entry day is never held** overnight.
+7. **Budget counting**: the higher of limit and average fill, × 100, rounded up to
+   the cent; working, unknown and errored buy orders reserve their full cost.
+8. **Budget skips continue down the list** (a cheaper, lower-delta pick can still
+   fit); the total stays capped at the budget either way.
+9. **Still one contract per pick**, never more (question for Cooper).
+10. **Default ranking delta: Schwab live** (fresh from the broker, not OCR-dependent);
+    picks without a delta rank last. Simulation uses the list's SCHWAB DELTA column.
+11. **Repricing = cancel, confirm, new order** (not `replace_order`), so a fill during
+    the cancel can never cause a second sale; quantity = what Schwab's executions show
+    is still held. Only lowers the price; a cancel Schwab never confirms is retried
+    after another interval; real orders only (simulated sells fill at once). The
+    3-minute "not filling" alert counts from the first sell order.
+12. **Earliest-buy guard added** (30 min before the close = 1:30 PM MT) so a list
+    confirmed hours early cannot buy at the open. New setting.
+13. The cutoff is **strict**: a buy needs now < 1:57 PM MT.
+14. **The latest confirmed list for a day replaces earlier ones** (fixing a typo by
+    re-confirming must not also buy the wrong picks).
+15. Practice runs for past dates or after the close **replay** without the window.
+16. **Half-day fix**: wall-clock endpoints move earlier by the early-close difference
+    and never before the open (15:35 → 12:35 on a 1 PM close).
+17. The Schwab login re-check before each buy still **refuses and stops** (as before).
+18. **Claude reader** uses `claude-opus-5-5` with refusal fallbacks; Apple Vision stays
+    the default on a Mac; the reader only transcribes (cells as text, never guessed).
+19. **Telegram**: long polling (no open ports); list trade date must be today; only
+    allowed chat IDs; buttons only work from the chat that got the preview; previews
+    live in memory for 1 hour; ignored chat IDs are shown on the dashboard to help setup.
+20. Confirming picks **during a run is now allowed** (it is the trigger). The old test
+    that refused it was changed accordingly.
+21. The watchdog's "positions open with nothing watching" alert **stays on** for
+    deliberate overnight holds, reworded to say the next day's run must be started.
+22. **Not pushed**: the session's hard rules say never push, which overrides the
+    cloud session's default instruction. Everything is committed locally only.
+
+Existing tests changed because Cooper's rules changed the expected behavior (none
+removed, none loosened on safety): the time-exit smoke test now holds overnight and
+sells next day; the delayed-entry test reaches take-profit; the slot-reservation
+test now checks that a working buy reserves budget; the cancel-race test starts at
+3:56 PM ET; the half-day hold ends at the real 12:59 window end; login messages
+are in MT; the settings tests cover every confirmation marker; confirming during a
+run is accepted; the unknown-order test gets budget for both picks.
 
 ## Still untested
 
-- Real quotes, option chains and read-only account calls (`get_account_numbers`,
-  positions, orders). The login is the only real Schwab request so far.
-- Real ntfy delivery (`NTFY_TOPIC` was still empty in the repo-root `.env` at last
-  check). Tests and `verify_app.py` never call ntfy.
-- Notifications from the **packaged** app: `verify_app.py` runs alerts log-only. One
-  real `osascript` notification from source returned success; whether it displays
-  depends on macOS notification permission (it appears as Script Editor).
-- The Reconnect flow from the packaged app, order recovery, and any live order path
-  (only mocks so far). Gatekeeper on another Mac and the Windows lock code.
-- The login being refreshed automatically by schwab-py across days, and the 7-day
-  expiry (assumed from Schwab's documentation, not observed yet).
+- Every real Schwab call except the login: run `python -m coopa_trada readonly-check`
+  on the Mac first, then a dry-run day on real prices.
+- Real Claude API and Telegram Bot API calls (both only mocked).
+- Real exit repricing at Schwab: what Schwab returns for a cancel of a filled order,
+  `PENDING_CANCEL` timing, and partial fills (all assumed from schwab-py, tested
+  against a fake).
+- The packaged macOS app was **not rebuilt** (Linux container); `verify_app.py`
+  passed against the source. The new `anthropic` dependency must be in the next build.
+- Real ntfy delivery, notifications from the packaged app, Gatekeeper, Windows.
 
-## Known issues
+## Known issues / risks
 
-- **Half-day exit-window bug (pre-existing, not fixed):** the SINGLE_NAME window
-  starts at the wall-clock `"15:35"`, which falls after a half day's 1:00 PM close,
-  so `CalendarService.exit_window` raises "ends before it starts" and the engine fails
-  for single-name picks on half days (e.g. Fri 2026-11-27, Thu 2026-12-24). The
-  login-hold check works around it by using that day's close.
-- **Market calendar expires:** the bundled `exchange_calendars` data ends at the
-  session of **2027-10-15**. After that, `next_session` fails and every Schwab run is
-  refused until the package is updated (rebuild the app afterwards).
-- **Same-day vs next-day exits are unresolved:** the engine sells in the entry session;
-  the login check assumes a next-day hold. Needs Cooper's answer before live use.
+- Every real Schwab call except the login is still untested (quotes, chains, orders,
+  cancels). Run `python -m coopa_trada readonly-check`, then a practice day on real
+  quotes, then a supervised live day with one cheap contract before unattended use.
+- Real Claude API and Telegram Bot API calls have only run against mocks.
+- The macOS app has not been rebuilt since these changes (it needs `anthropic`).
+- Telegram previews live in memory: a restart loses pending previews (resend).
+- The bundled market calendar ends at the session of 2027-10-15; the watchdog alerts
+  60 days before. Update `exchange-calendars` then.
 
 ## Next steps
 
-1. **Read-only test with real quotes**, then **a dry-run day on real prices**: real
-   quotes/chains through `SchwabQuoteSource` / `ContractResolver` with simulated
-   orders (no order endpoint), watched end to end, comparing fills and exits against
-   what Schwab showed.
-2. **Linux / AWS prep:**
-   - Replace the Mac-only screenshot reader (Apple Vision) with a cross-platform OCR,
-     or rely on CSV upload there.
-   - Run as a service with automatic restart (e.g. systemd `Restart=on-failure`), with
-     the stale-lock and crash-leftover rules deciding what happens after a restart.
-   - Reach the dashboard over Tailscale instead of exposing it; it binds 127.0.0.1 and
-     has no authentication of its own. Weekly reconnect then uses the same
-     paste-the-address flow over the tailnet.
-   - Swap the macOS-only pieces (keep-awake, Mac notifications) for their server
-     equivalents (none needed / ntfy only).
-
-## Implemented in this revision
-
-- Poll live order status and import validated executions atomically, including
-  delayed fills and actual execution prices/timestamps.
-- Keep monitoring pending entries; cancel them at the exit deadline, accounting
-  for a fill racing with cancellation. Report unsettled exposure at market close.
-- Persist price peaks across ticks/restarts; enforce exit-window start times.
-- Separate simulation/live positions and idempotency keys. Bind live DBs to an
-  account; block unverified legacy live DBs and reconciliation divergences.
-- Count pending buys toward the position cap. The spending cap is checked against
-  ask × 100 (the entry limit price), not mid.
-- Reject failed HTTP responses, bad quotes, historical live runs, and live --once.
-- Add CSV/JPEG/PNG upload, local Apple Vision recognition, strict preview validation,
-  signed confirmation, and immutable reviewed CSV files.
-- Correct the sample CSV's SNOW, DDOG, PLTR and GDX rows to match the supplied image.
-- Three Cooper-pending settings (spending cap, 10% stop basis, delta filter) each
-  have a `setting_confirmations` marker in `rules.yaml`. Any unconfirmed marker
-  blocks live runs in `Engine.run` (CLI and web alike); dry runs are never blocked.
-  Settings shows an Unconfirmed badge and a Confirm checkbox per setting; the
-  dashboard's live panel lists the unconfirmed settings and their current values.
-  Changing a confirmed value resets its marker unless the same save re-confirms it.
-- Optional delta filter (`delta_filter`): off by default; Schwab (0–1) or TVT (0–100)
-  delta, inclusive |delta| band. Editable in Settings with the same validation as YAML.
+1. Set up the server (docs/SERVER_SETUP.md) or keep the Mac; fill in `.env`.
+2. `python -m coopa_trada readonly-check`; Telegram bot (docs/TELEGRAM_SETUP.md).
+3. A few practice days on real quotes (automatic start, Telegram confirm).
+4. Supervised live checks with one cheap contract (buy, sell, a forced reprice), then
+   `LIVE_TRADING=1` (and `AUTO_START_LIVE=1` for unattended days).
 
 ## Validation
 
-**249 automated tests pass** (210 at the start of this session) (`.venv/bin/python -m pytest`; `.venv` built from
-`requirements.txt` plus pytest). Coverage includes lifecycle, rejection, delayed
-fill, restart, mode isolation, account binding, spending cap at the ask, the live
-block per unconfirmed setting, confirmation persistence and reset, delta filter
-validation, token states and the start gate, the mocked reconnect flow, process
-locks (with real subprocesses for concurrent and crashed holders), uncertain-order
-recovery, the desktop launcher, and upload/preview/image recognition.
+**373 automated tests pass** (249 before 2026-10-22). `packaging/verify_app.py --source`
+passes inside the suite; a headless-browser check loaded Settings and the Dashboard
+without JavaScript errors; `packaging/server/install.sh` was run in a scratch copy
+(with `sudo` stubbed) and the installed copy served the dashboard.
 
-`packaging/build_macos.sh` built `dist/Coopa Trada.app` (arm64, 73 MB), and
-`packaging/verify_app.py --app` passed against it: dry run by default, the typed
-phrase, `LIVE_TRADING=1` from the `.env` next to the app, unconfirmed settings and
-a missing Schwab login each refused a live start, a dry run completed, and Quit
-exited cleanly. The bundled picture reader read all eight rows of a rendered
-sample picks table correctly. A real double-click launch (browser opening) and
-Gatekeeper on another Mac were not tested.
-
-Actual Apple Vision recognition was run locally on the supplied screenshot. All
-eight rows matched the corrected CSV. Safari was used to upload the original image,
-enter explicit dates, preview all eight contracts, and confirm the list while the
-runner remained idle. No credentials or real trading were used.
-
-## Pending Cooper / integration
-
-Defaults below are in place and adjustable; each blocks live runs until confirmed.
-
-1. Actual per-position dollar cap (default $300, checked at the ask).
-2. Entry-price vs peak-price interpretation of “drops 10%,” and whether it replaces
-   the other exit rules (default: 10% from session peak, alongside the standard exits).
-3. Whether Cooper filters delta upstream (default: yes, so the in-app filter is off).
-4. The questions at the end of each section of `docs/OPEN_DESIGN.md`
-   (exit repricing, broker-side stops, leftovers after a crash).
-5. Read-only Schwab verification, then supervised order-lifecycle checks on a real
-   account before considering unattended operation. The login now works from source;
-   order recovery and every order path have only run against mocks.
-
-Not built yet (see `docs/OPEN_DESIGN.md`): repricing an unfilled exit, a broker-side
-protective stop, special handling for positions left over after a crash. Stop means
-stop monitoring, not liquidate. The app keeps the Mac from idle sleeping while it
-has something to watch, but closing the lid still sleeps it. The app is not code-signed or notarized, so Cooper has to
-use Open Anyway on first launch. See README for setup and operational limits.
+## Earlier sessions (reference)
 
 ## Schwab login status and weekly reconnect
 
@@ -152,8 +202,8 @@ use Open Anyway on first launch. See README for setup and operational limits.
   (`CalendarService.next_day_exit_end`, weekends and holidays skipped; a window that
   can't resolve on a half day counts as lasting to that day's close). The check runs
   at start and again at entry time. Simulation with synthetic data needs no token.
-  Note: the engine itself still manages exits in the *same* session (the exit windows
-  resolve on the entry date). The longer gate is deliberately conservative.
+  Since 2026-10-22 positions are held to the next trading day by design (Cooper's
+  hold rule), so this gate matches what the engine does.
   `wiring.schwab_client` checks before schwab-py even loads the file.
 - Dashboard: status pill, countdown, warning banner under 2 days *or* whenever the
   login won't cover the next run's hold (red, since that run would be refused), and a

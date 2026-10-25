@@ -8,6 +8,7 @@ as JSON text. A test reconstructs a complete round trip from the DB only.
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -148,6 +149,19 @@ class Store:
 
         with self.transaction():
             columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(orders)")}
+            if "entry_mid" not in columns:
+                # The option's mid (between bid and ask) when the buy was placed.
+                self.conn.execute("ALTER TABLE orders ADD COLUMN entry_mid REAL")
+            if "reprice_attempt" not in columns:
+                # Exit repricing: 0 for the first sell order, n for its n-th replacement.
+                self.conn.execute("ALTER TABLE orders ADD COLUMN reprice_attempt INTEGER NOT NULL DEFAULT 0")
+                self.conn.execute("ALTER TABLE orders ADD COLUMN replaces_order_id INTEGER REFERENCES orders(id)")
+                # Set when the bot asked Schwab to cancel this order so it can be repriced.
+                self.conn.execute("ALTER TABLE orders ADD COLUMN cancel_requested_at_utc TEXT")
+            if "trading_day" not in columns:
+                # The session an order was placed for. Decides whether a position is on its
+                # entry day or held from an earlier day. Legacy rows fall back to the fill date.
+                self.conn.execute("ALTER TABLE orders ADD COLUMN trading_day TEXT")
             if "entry_order_id" not in columns:
                 self.conn.execute("ALTER TABLE orders ADD COLUMN entry_order_id INTEGER REFERENCES orders(id)")
                 # Legacy logs had no entry link. Associate each exit with its most
@@ -220,6 +234,10 @@ class Store:
         request: Any,
         created_at: datetime | None = None,
         entry_order_id: int | None = None,
+        trading_day=None,
+        replaces_order_id: int | None = None,
+        reprice_attempt: int = 0,
+        entry_mid: float | None = None,
     ) -> int:
         """Insert a PENDING (or given-status) order row with its request JSON.
 
@@ -242,8 +260,9 @@ class Store:
                 """
                 INSERT INTO orders
                     (signal_id, intent, idempotency_key, mode, osi_symbol, side,
-                     quantity, limit_price, status, created_at_utc, request_json, entry_order_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     quantity, limit_price, status, created_at_utc, request_json, entry_order_id,
+                     trading_day, replaces_order_id, reprice_attempt, entry_mid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     signal_id,
@@ -258,6 +277,10 @@ class Store:
                     created,
                     _json(request),
                     entry_order_id,
+                    trading_day.isoformat() if hasattr(trading_day, "isoformat") else trading_day,
+                    replaces_order_id,
+                    int(reprice_attempt),
+                    entry_mid,
                 ),
             )
             return int(cur.lastrowid)
@@ -395,6 +418,8 @@ class Store:
             )
             SELECT * FROM (SELECT o.id AS order_id, o.signal_id, o.osi_symbol, o.mode,
                    o.limit_price, f.price AS entry_price, f.at_utc AS entry_at_utc,
+                   o.trading_day AS trading_day, o.entry_mid AS entry_mid,
+                   p.peak_mid AS stored_peak,
                    f.qty - COALESCE((
                        SELECT SUM(xf.qty) FROM orders xo JOIN totals xf ON xf.order_id = xo.id
                        WHERE xo.intent = 'EXIT' AND xo.entry_order_id = o.id AND xo.mode = o.mode
@@ -407,6 +432,39 @@ class Store:
             ORDER BY order_id
             """, (mode, mode)
         ).fetchall()
+
+    def exit_orders(self, mode: str, entry_order_id: int) -> list[sqlite3.Row]:
+        """Every sell order for one entry, oldest first (the original, then replacements)."""
+        return self.conn.execute(
+            "SELECT * FROM orders WHERE intent='EXIT' AND mode=? AND entry_order_id=? ORDER BY id",
+            (mode, entry_order_id)).fetchall()
+
+    def set_cancel_requested(self, order_id: int, at: datetime | None) -> None:
+        self.conn.execute("UPDATE orders SET cancel_requested_at_utc = ? WHERE id = ?",
+                          (_iso(at) if at is not None else None, order_id))
+
+    def committed_cents(self, mode: str) -> int:
+        """What all open positions and working buy orders in ``mode`` cost, in cents.
+
+        Counted conservatively for the total budget: each entry at the higher of its
+        limit (the ask it was bought at) and its average fill price, times 100 per
+        contract. A buy order that is still open (or unknown) reserves its whole
+        unsold quantity; a closed one counts what was filled and not yet sold.
+        """
+        total = 0
+        for o in self.conn.execute("SELECT * FROM orders WHERE intent='ENTRY' AND mode=?", (mode,)):
+            fills = self.fills_for_order(o["id"])
+            filled = sum(f["quantity"] for f in fills)
+            avg = sum(f["quantity"] * f["price"] for f in fills) / filled if filled else 0.0
+            sold = self.conn.execute(
+                """SELECT COALESCE(SUM(f.quantity), 0) FROM fills f JOIN orders x ON x.id = f.order_id
+                   WHERE x.intent='EXIT' AND x.entry_order_id=? AND x.mode=?""", (o["id"], mode)).fetchone()[0]
+            held = (o["quantity"] if o["status"] not in _CLOSED_ORDER_STATUSES else filled) - sold
+            if held > 0:
+                # Round fractions of a cent up: the budget must never be understated.
+                price_cents = math.ceil(max(o["limit_price"] or 0.0, avg) * 100 - 1e-6)
+                total += held * price_cents * 100
+        return total
 
     def update_peak(self, order_id: int, mid: float) -> None:
         self.conn.execute(
@@ -515,8 +573,17 @@ class Store:
             WITH execution_totals AS (
                 SELECT order_id, SUM(quantity) AS quantity,
                        SUM(quantity * price) / SUM(quantity) AS price,
-                       MIN(filled_at_utc) AS filled_at_utc, MIN(id) AS id
+                       MIN(filled_at_utc) AS filled_at_utc, MAX(filled_at_utc) AS last_at_utc,
+                       MIN(id) AS id
                 FROM fills GROUP BY order_id
+            ),
+            -- All sell orders of one entry together: a repriced exit is several orders.
+            exit_totals AS (
+                SELECT xo.entry_order_id AS entry_id, SUM(xf.quantity) AS quantity,
+                       SUM(xf.quantity * xf.price) / SUM(xf.quantity) AS price,
+                       MAX(xf.last_at_utc) AS filled_at_utc
+                FROM orders xo JOIN execution_totals xf ON xf.order_id = xo.id
+                WHERE xo.intent = 'EXIT' GROUP BY xo.entry_order_id
             )
             SELECT
                 e.signal_id          AS signal_id,
@@ -526,23 +593,22 @@ class Store:
                 ef.quantity          AS quantity,
                 ef.price             AS entry_price,
                 ef.filled_at_utc     AS entry_at_utc,
-                xf.price             AS exit_price,
-                xf.quantity          AS exited_quantity,
-                xf.filled_at_utc     AS exit_at_utc,
+                xt.price             AS exit_price,
+                xt.quantity          AS exited_quantity,
+                xt.filled_at_utc     AS exit_at_utc,
                 ev.strategy          AS exit_strategy,
-                ev.reason            AS exit_reason
+                ev.reason            AS exit_reason,
+                (SELECT MAX(reprice_attempt) FROM orders r
+                  WHERE r.intent = 'EXIT' AND r.entry_order_id = e.id) AS exit_reprices
             FROM orders e
             JOIN execution_totals ef ON ef.order_id = e.id
             LEFT JOIN signals s ON s.id = e.signal_id
-            LEFT JOIN orders xo
-                   ON xo.intent = 'EXIT' AND xo.entry_order_id = e.id AND xo.mode = e.mode
-            LEFT JOIN execution_totals xf ON xf.order_id = xo.id
-            LEFT JOIN exit_events ev
-                   ON ev.order_id = xo.id AND ev.position_key = (e.signal_id || ':' || e.osi_symbol)
-                  AND ev.id = (
-                        SELECT MAX(id) FROM exit_events
-                        WHERE order_id = xo.id
-                  )
+            LEFT JOIN exit_totals xt ON xt.entry_id = e.id
+            -- Why it sold: the decision on the first sell order (replacements only lower the price).
+            LEFT JOIN exit_events ev ON ev.id = (
+                SELECT MIN(x.id) FROM exit_events x JOIN orders xo ON xo.id = x.order_id
+                WHERE xo.intent = 'EXIT' AND xo.entry_order_id = e.id AND xo.mode = e.mode
+                  AND x.position_key = (e.signal_id || ':' || e.osi_symbol))
             WHERE e.intent = 'ENTRY'
             ORDER BY ef.id
             """

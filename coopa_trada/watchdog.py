@@ -31,15 +31,19 @@ log = get_logger("coopa_trada.watchdog", "APP")
 
 # Repeat a still-true login warning twice a day, not every 6 hours.
 TOKEN_ALERT_REPEAT = timedelta(hours=12)
+# Warn this many days before the bundled market calendar ends.
+CALENDAR_WARNING_DAYS = 60
 
 
 class Watchdog:
     def __init__(self, paths, runner, alerter: Alerter, *, keep_awake=None, interval: float = 60.0,
-                 now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
+                 now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), auto_start=None):
         self.paths = paths
         self.runner = runner
         self.alerter = alerter
         self.keep_awake = keep_awake
+        # autostart.AutoStarter (or None): starts the day's run when it is due.
+        self.auto_start = auto_start
         self.interval = interval
         self._now = now
         self._first = True
@@ -73,8 +77,8 @@ class Watchdog:
 
     def tick(self) -> None:
         now = self._now()
-        checks = [self._check_keep_awake, self._check_token, self._check_stale_locks,
-                  self._check_leftovers]
+        checks = [self._check_auto_start, self._check_keep_awake, self._check_token,
+                  self._check_stale_locks, self._check_leftovers, self._check_calendar]
         if self._first:
             checks.append(self._check_incidents)
         for check in checks:
@@ -85,6 +89,22 @@ class Watchdog:
         self._first = False
 
     # -- checks ----------------------------------------------------------------
+    def _check_calendar(self, now: datetime) -> None:
+        """The bundled market calendar ends on a fixed date; after it no run can start."""
+        from .calendar_svc import CalendarService
+        last = CalendarService().cal.last_session.date()
+        days = (last - now.date()).days
+        if days <= CALENDAR_WARNING_DAYS:
+            self.alerter.alert(
+                "calendar", "Market calendar running out",
+                f"The bundled market calendar ends {last:%b} {last.day}, {last.year} ({max(days, 0)} days). "
+                f"After that no run can start. Update the app (pip install -U exchange-calendars, "
+                f"or a new build) before then.", key="calendar", repeat_after=timedelta(days=1))
+
+    def _check_auto_start(self, now: datetime) -> None:
+        if self.auto_start is not None:
+            self.auto_start.check(now)
+
     def _check_keep_awake(self, now: datetime) -> None:
         if self.keep_awake is None:
             return
@@ -158,8 +178,10 @@ class Watchdog:
         n = len(open_live)
         self.alerter.alert("crash_recovery", "Positions open with nothing watching them",
                            f"{n} real position{'s are' if n != 1 else ' is'} open but no run is "
-                           f"managing {'them' if n != 1 else 'it'}. Decide what to do: check "
-                           f"Schwab, then start a run or sell there.", key="leftovers")
+                           f"managing {'them' if n != 1 else 'it'}. Positions held overnight on "
+                           f"purpose still need the next trading day's run started (before the "
+                           f"open) so their exits are watched. Otherwise check Schwab, then start "
+                           f"a run or sell there.", key="leftovers")
 
     def _check_incidents(self, now: datetime) -> None:
         incidents = self._with_store(lambda s: s.open_incidents())

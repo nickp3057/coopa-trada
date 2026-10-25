@@ -17,7 +17,7 @@
     table.replaceChildren();
   }
   [csv, day, expiration].forEach(el => el.addEventListener("input", invalidate));
-  // Pictures need Apple's text recognition; elsewhere, say so before anyone tries.
+  // Pictures need a reader (Apple's on a Mac, or Claude with an API key); without one, say so up front.
   CT.get("/api/app").then(({ok, body}) => {
     if (!ok || body.image_upload.available) return;
     document.getElementById("picks-file").setAttribute("accept", ".csv");

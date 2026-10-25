@@ -21,40 +21,11 @@ if TYPE_CHECKING:
     from .contracts import ResolvedContract
     from .models import Signal
 
-__all__ = ["Rules", "load_rules", "PositionSizer", "FixedQuantitySizer", "DeltaFilter", "setting_confirmations", "default_settings_metadata", "unconfirmed_settings"]
+__all__ = ["Rules", "load_rules", "PositionSizer", "FixedQuantitySizer", "DeltaFilter", "RANK_DELTA_SOURCES"]
 
 
-SETTING_LABELS = {
-    "spending_cap": "spending cap",
-    "ten_percent_stop": "10% stop basis",
-    "delta_filter": "delta filter",
-}
-
-
-def setting_confirmations(raw: dict | None = None) -> dict:
-    """One registry for all hand-edited confirmation markers; missing means false."""
-    raw = {} if raw is None else raw
-    if not isinstance(raw, dict):
-        raise ValueError("setting_confirmations must be a mapping")
-    if set(raw) - SETTING_LABELS.keys():
-        raise ValueError("Unknown setting in setting_confirmations")
-    result = {}
-    for key in SETTING_LABELS:
-        marker = raw.get(key, {"confirmed_by_cooper": False})
-        if not isinstance(marker, dict) or type(marker.get("confirmed_by_cooper")) is not bool:
-            raise ValueError(f"setting_confirmations.{key}.confirmed_by_cooper must be true or false")
-        result[key] = {"confirmed_by_cooper": marker["confirmed_by_cooper"]}
-    return result
-
-
-def default_settings_metadata(markers: dict) -> list[dict]:
-    return [{"key": key, "label": label, **markers[key]}
-            for key, label in SETTING_LABELS.items()]
-
-
-def unconfirmed_settings(markers: dict) -> list[str]:
-    """Keys still awaiting Cooper's confirmation. Any entry blocks a live run."""
-    return [key for key in SETTING_LABELS if not markers[key]["confirmed_by_cooper"]]
+RANK_DELTA_SOURCES = ("schwab_live", "tvt")
+EXIT_REFERENCE_PRICES = ("mid_at_entry", "fill")
 
 
 @dataclass(frozen=True)
@@ -102,28 +73,63 @@ class DeltaFilter:
 
 @dataclass(frozen=True)
 class Rules:
-    entry_minutes_before_close: int
     exit_window: dict[AssetClass, tuple[time | int, time | int]]
     trailing_stop_pct: float
     hard_stop_loss_pct: float
     take_profit_pct: float
-    max_concurrent_positions: int
     max_dollars_per_position: float
     poll_interval_seconds: int
     delta_filter: DeltaFilter = field(default_factory=DeltaFilter)
-    setting_confirmations: dict = field(default_factory=setting_confirmations)
     # Optional existing strategies; null leaves the corresponding strategy unwired.
     cooper_drop_from_peak_pct: float | None = None
     cooper_drop_from_entry_pct: float | None = None
-
-    def live_block_reason(self) -> str | None:
-        """Why a live run must not start, or None. Dry runs ignore this."""
-        pending = unconfirmed_settings(self.setting_confirmations)
-        if not pending:
-            return None
-        labels = ", ".join(SETTING_LABELS[key] for key in pending)
-        return (f"Live run blocked: unconfirmed settings: {labels}. "
-                "Confirm each with Cooper, then tick Confirm in Settings.")
+    # Cooper's rule: sell when profit % drops this many points below its peak
+    # profit % (None = off). See exits.ProfitPointTrail.
+    profit_trail_points: float | None = 10.0
+    profit_trail_arm: str = "from_entry"
+    # Hold logic (Cooper): take-profit sells the same day; otherwise the position
+    # is held and every exit applies on the next trading day.
+    # True: stop-type exits (hard stop, trailing stops, profit-point trail) also
+    # protect the position on the day it was bought.
+    stops_on_entry_day: bool = True
+    # When held positions start being watched on the next trading day:
+    # "open" (the session open), a New York HH:MM time, or minutes before the close.
+    held_exit_start: object = "open"
+    # Cooper: $300 is the TOTAL budget, the most that all open positions together
+    # may cost (including ones held from earlier days), checked at ask x 100.
+    # There is no position-count limit: picks are bought, highest delta first,
+    # while each still fits.
+    total_budget: float = 300.0
+    # Which delta ranks the picks: "schwab_live" (from Schwab's option chain at
+    # buying time) or "tvt" (the TVT-DELTA column of the pick list).
+    rank_delta_source: str = "schwab_live"
+    # Cooper: a sell that has not filled after this many seconds is canceled and
+    # replaced at the current bid (never a market order), at most
+    # exit_reprice_max_attempts times; then a person is alerted. 0 attempts = off.
+    # Buying happens when picks are confirmed (Telegram or the dashboard), not at
+    # a fixed time, but only inside this window, counted back from the real close
+    # (half days included): no buys before `earliest` (a guard against a list
+    # confirmed hours early) and none at or after `no_new_buys`.
+    # The price the exit rules measure from. "mid_at_entry": the option's mid
+    # (halfway between bid and ask) when it was bought, so a wide bid-ask gap
+    # does not look like an instant loss (bought at a $1.00 ask with a $0.80 bid:
+    # the rules start from $0.90). "fill": the price actually paid (the ask).
+    # Profit and loss in the trade log always use the real fill prices.
+    exit_reference_price: str = "mid_at_entry"
+    # Start the day's run automatically at this Mountain time on trading days
+    # (see autostart.py). 07:00 MT is 30 minutes before the open.
+    # Next trading day: sell anything still open at that day's exit-window end
+    # (at most one night held). False: keep holding until a rule fires (an
+    # option is still sold on its expiration day).
+    next_day_time_exit: bool = True
+    # Contracts bought per pick (the per-pick cap and the budget count them all).
+    contracts_per_pick: int = 1
+    auto_start_daily: bool = True
+    auto_start_time: time = time(7, 0)
+    earliest_buy_minutes_before_close: int = 30
+    no_new_buys_minutes_before_close: int = 3
+    exit_reprice_after_seconds: int = 60
+    exit_reprice_max_attempts: int = 5
 
 
 class PositionSizer(Protocol):
@@ -210,12 +216,10 @@ def load_rules(path: str | Path) -> Rules:
         raise ValueError(f"{path}: top-level YAML must be a mapping")
 
     required = {
-        "entry_minutes_before_close",
         "exit_window",
         "trailing_stop_pct",
         "hard_stop_loss_pct",
         "take_profit_pct",
-        "max_concurrent_positions",
         "max_dollars_per_position",
         "poll_interval_seconds",
     }
@@ -223,9 +227,17 @@ def load_rules(path: str | Path) -> Rules:
     if missing:
         raise ValueError(f"{path}: missing rule keys: {', '.join(sorted(missing))}")
 
-    entry_minutes = int(data["entry_minutes_before_close"])
-    if entry_minutes <= 0:
-        raise ValueError("entry_minutes_before_close must be positive")
+    # entry_minutes_before_close (a fixed buying time) was replaced by buying when
+    # picks are confirmed; older files may still carry it and it is ignored.
+    buy_window = {}
+    for name, default in (("earliest_buy_minutes_before_close", 30), ("no_new_buys_minutes_before_close", 3)):
+        value = data.get(name, default)
+        if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 390:
+            raise ValueError(f"{name} must be a whole number of minutes from 0 to 390")
+        buy_window[name] = value
+    if buy_window["earliest_buy_minutes_before_close"] <= buy_window["no_new_buys_minutes_before_close"]:
+        raise ValueError("earliest_buy_minutes_before_close must be more minutes before the close "
+                         "than no_new_buys_minutes_before_close")
 
     max_dollars = float(data["max_dollars_per_position"])
     if not math.isfinite(max_dollars) or max_dollars <= 0:
@@ -234,15 +246,92 @@ def load_rules(path: str | Path) -> Rules:
     cooper_peak = data.get("cooper_drop_from_peak_pct")
     cooper_entry = data.get("cooper_drop_from_entry_pct")
 
+    trail_points = data.get("profit_trail_points", 10.0)
+    if trail_points is not None:
+        trail_points = float(trail_points)
+        if not math.isfinite(trail_points) or not 0 < trail_points < 100:
+            raise ValueError("profit_trail_points must be between 0 and 100 (percentage points), or blank")
+    trail_arm = data.get("profit_trail_arm", "from_entry")
+    from .exits import PROFIT_TRAIL_ARMS
+    if trail_arm not in PROFIT_TRAIL_ARMS:
+        raise ValueError(f"profit_trail_arm must be one of: {', '.join(PROFIT_TRAIL_ARMS)}")
+
+    stops_today = data.get("stops_on_entry_day", True)
+    if type(stops_today) is not bool:
+        raise ValueError("stops_on_entry_day must be true or false")
+    held_start = data.get("held_exit_start", "open")
+    if not (isinstance(held_start, str) and held_start.strip().lower() == "open"):
+        try:
+            held_start = _coerce_endpoint(held_start)
+            # An unquoted 14:00 in YAML reads as the number 840 (base 60); a full
+            # session is 390 minutes, so larger numbers are refused, not guessed at.
+            if isinstance(held_start, time) and not time(4) <= held_start <= time(20):
+                raise ValueError
+            if isinstance(held_start, int) and held_start > 390:
+                raise ValueError
+        except (ValueError, TypeError):
+            raise ValueError('held_exit_start must be "open", a New York HH:MM time, '
+                             "or whole minutes before the close") from None
+    else:
+        held_start = "open"
+
+    # max_concurrent_positions (a fixed position count) was removed at Cooper's
+    # request; older files may still carry it and it is ignored.
+    budget = float(data.get("total_budget", 300.0))
+    if not math.isfinite(budget) or budget <= 0:
+        raise ValueError("total_budget must be a positive dollar amount")
+    rank_source = data.get("rank_delta_source", "schwab_live")
+    if rank_source not in RANK_DELTA_SOURCES:
+        raise ValueError(f"rank_delta_source must be one of: {', '.join(RANK_DELTA_SOURCES)}")
+
+    reprice_after = data.get("exit_reprice_after_seconds", 60)
+    reprice_max = data.get("exit_reprice_max_attempts", 5)
+    if isinstance(reprice_after, bool) or not isinstance(reprice_after, int) or not 10 <= reprice_after <= 3600:
+        raise ValueError("exit_reprice_after_seconds must be a whole number from 10 to 3600")
+    if isinstance(reprice_max, bool) or not isinstance(reprice_max, int) or not 0 <= reprice_max <= 20:
+        raise ValueError("exit_reprice_max_attempts must be a whole number from 0 to 20")
+
+    reference = data.get("exit_reference_price", "mid_at_entry")
+    if reference not in EXIT_REFERENCE_PRICES:
+        raise ValueError(f"exit_reference_price must be one of: {', '.join(EXIT_REFERENCE_PRICES)}")
+
+    auto_daily = data.get("auto_start_daily", True)
+    if type(auto_daily) is not bool:
+        raise ValueError("auto_start_daily must be true or false")
+    try:
+        auto_time = _coerce_endpoint(data.get("auto_start_time", "07:00"))
+        if not isinstance(auto_time, time):
+            raise ValueError
+    except (ValueError, TypeError):
+        raise ValueError('auto_start_time must be a Mountain-time HH:MM, for example "07:00"') from None
+
+    time_exit = data.get("next_day_time_exit", True)
+    if type(time_exit) is not bool:
+        raise ValueError("next_day_time_exit must be true or false")
+    per_pick = data.get("contracts_per_pick", 1)
+    if isinstance(per_pick, bool) or not isinstance(per_pick, int) or not 1 <= per_pick <= 100:
+        raise ValueError("contracts_per_pick must be a whole number from 1 to 100")
+
     return Rules(
+        next_day_time_exit=time_exit,
+        contracts_per_pick=per_pick,
+        auto_start_daily=auto_daily,
+        auto_start_time=auto_time,
+        exit_reference_price=reference,
+        exit_reprice_after_seconds=reprice_after,
+        exit_reprice_max_attempts=reprice_max,
+        total_budget=budget,
+        rank_delta_source=rank_source,
+        stops_on_entry_day=stops_today,
+        held_exit_start=held_start,
+        profit_trail_points=trail_points,
+        profit_trail_arm=trail_arm,
         delta_filter=DeltaFilter.from_config(data.get("delta_filter")),
-        setting_confirmations=setting_confirmations(data.get("setting_confirmations")),
-        entry_minutes_before_close=entry_minutes,
+        **buy_window,
         exit_window=_coerce_exit_window(data["exit_window"]),
         trailing_stop_pct=_pct("trailing_stop_pct", data["trailing_stop_pct"]),
         hard_stop_loss_pct=_pct("hard_stop_loss_pct", data["hard_stop_loss_pct"]),
         take_profit_pct=_pct("take_profit_pct", data["take_profit_pct"]),
-        max_concurrent_positions=_pos_int("max_concurrent_positions", data["max_concurrent_positions"]),
         max_dollars_per_position=max_dollars,
         poll_interval_seconds=_pos_int("poll_interval_seconds", data["poll_interval_seconds"]),
         cooper_drop_from_peak_pct=(

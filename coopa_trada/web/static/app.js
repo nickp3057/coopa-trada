@@ -16,11 +16,15 @@ const CT = {
     const body = await r.json().catch(() => ({}));
     return { ok: r.ok, status: r.status, body };
   },
+  // Every time on these pages is shown in Mountain time (Cooper is in Utah).
   fmtTime(iso) {
     if (!iso) return "—";
-    const d = new Date(iso);
+    const d = iso instanceof Date ? iso : new Date(iso);
     if (isNaN(d)) return iso;
-    return d.toLocaleString();
+    return d.toLocaleString("en-US", {
+      timeZone: "America/Denver", month: "short", day: "numeric",
+      hour: "numeric", minute: "2-digit",
+    }) + " MT";
   },
   fmtMoney(n) {
     if (n === null || n === undefined) return "—";

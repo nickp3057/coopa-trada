@@ -15,6 +15,7 @@ dependencies = [
     "exchange-calendars",
     "PyYAML",
     "python-dotenv",
+    "anthropic",
 ]
 
 [project.optional-dependencies]
