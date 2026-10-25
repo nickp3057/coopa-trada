@@ -176,3 +176,11 @@ def test_the_bot_shows_who_is_logged_in_only_from_the_local_gateway(tmp_path):
     assert b"cooper &middot; Log out" in local.data
     far = bot.get("/", headers={"X-Coopa-User": "cooper"}, environ_base={"REMOTE_ADDR": "203.0.113.5"})
     assert b"Log out" not in far.data
+
+
+def test_the_bots_stylesheets_and_scripts_are_forwarded(setup):
+    client, config, _, bots = setup
+    login(client, config, "cooper")
+    for path in ("/static/app.css", "/static/dashboard.js"):
+        assert client.get(path).status_code == 200
+        assert bots.calls[-1][1] == "http://127.0.0.1:8771" + path

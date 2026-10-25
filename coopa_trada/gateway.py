@@ -197,7 +197,8 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
     from flask import Flask, make_response, redirect, request
     from itsdangerous import BadSignature, URLSafeTimedSerializer
 
-    app = Flask(__name__)
+    # No static folder of its own: /static/... must reach the person's bot (its CSS and JS).
+    app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = 9 * 1024 * 1024
     signer = URLSafeTimedSerializer(config.secret_key, salt="coopa-gateway-session")
     throttle = Throttle(clock)
