@@ -1,6 +1,6 @@
 # Project state — Coopa Trada
 
-_Last updated: 2026-10-25_
+_Last updated: 2026-10-26_
 
 Python/Flask app that trades Cooper's daily FOMC option picks through Schwab. It runs
 as a double-click macOS app or as a service on a Linux server
@@ -35,6 +35,11 @@ On `claude/gracious-einstein-a30t1n`, one commit each (373 tests passing):
   end of the next day; default yes) and `contracts_per_pick` (default 1).
 - Docs: HOW_IT_TRADES has a full settings table instead of questions; COOPER_README
   and README describe the automatic start and server use.
+
+**Multi-person website** (`fa02222`): one bot per person (`coopa-trada@NAME`, own
+data folder, `.env`, Schwab login, settings, trade log, Telegram bot) behind
+`coopa_trada.gateway` (password + TOTP 2FA, lockout, 12-hour signed session), HTTPS by
+Caddy on a free DuckDNS name. Verified end to end with two bots and curl.
 
 Hosting: a 1 GB Linux server (AWS Lightsail, DigitalOcean, Hetzner), about $5–12 a
 month, on 24/7, reached privately over Tailscale.

@@ -1,152 +1,148 @@
-# Running Coopa Trada on a server
+# Running Coopa Trada on a server (AWS Lightsail)
 
-A small always-on Linux server replaces the Mac: no lid to keep open, no sleep,
-no "plugged in" rule. The bot starts the day's run by itself at 7:00 AM MT, reads
-Cooper's Telegram screenshots, and alerts your phone through ntfy.
+The server runs **one separate bot per person** plus a **login website**:
 
-**What it costs.** One small server, about **$5–12 a month** (AWS Lightsail,
-DigitalOcean or Hetzner all work; check their current prices). 1 GB of memory is
-enough. The Claude picture reader costs cents a month (one screenshot a day).
-Telegram, ntfy and Tailscale are free. Leave the server on all the time; that
-costs the same as turning it off at night.
+```
+https://yourname.duckdns.org  ->  Caddy (HTTPS)  ->  login website  ->  Cooper's bot  (his Schwab, settings, trades)
+                                                                    ->  Nick's bot    (his Schwab, settings, trades)
+```
 
-**What it doesn't change.** Schwab still asks for a new login every 7 days (one
-minute, through the dashboard, from any browser on your phone or laptop).
+When Cooper logs in he sees only his bot, with his Schwab login, settings and trade
+log. When you log in you see only yours. The bots share no files and no Schwab login,
+and each has its own Telegram bot, so nothing one person does can touch the other's
+account. (Running the same Schwab account in both is refused automatically.)
 
-This guide uses **AWS Lightsail** with **Ubuntu 24.04**. Other providers are the
-same from step 2 on.
+**Cost:** about $7/month for a 1 GB Lightsail server, billed monthly with no upfront
+fee and no contract. The DuckDNS address, the HTTPS certificate, Telegram and ntfy are
+free; the Claude picture reader costs a few dollars a year.
 
 ---
 
-## 1. Create the server (Lightsail)
+## 1. Create the server
 
-1. Sign in to the AWS console and open **Lightsail** → **Create instance**.
-2. Region: one near you (for example Oregon, `us-west-2`).
-3. Platform **Linux/Unix**, blueprint **OS Only → Ubuntu 24.04 LTS**.
-4. Plan: **1 GB memory** (dual-stack, with a public IPv4 address).
-5. Name it `coopa-trada` and click **Create instance**.
-6. When it says **Running**, click the terminal icon (**Connect using SSH**). A
-   terminal opens in the browser. Every command below goes there.
+1. Go to **lightsail.aws.amazon.com** and sign in (or create an AWS account; it
+   asks for a card and a phone check).
+2. **Create instance** → region near you (e.g. **Oregon**) → **Linux/Unix** →
+   **OS Only** → **Ubuntu 24.04 LTS**.
+3. Plan: **$7 (1 GB memory, 2 vCPU, 40 GB)** on the **dual-stack** tab.
+4. Name: `coopa-trada` → **Create instance**. Wait until it says **Running**.
 
-Leave the Lightsail firewall as it is (SSH only). The dashboard is never opened to
-the internet; step 6 reaches it privately.
+## 2. Give it a fixed address and open the web ports
 
-## 2. Install Python and git, and get the code
+1. Open the instance → **Networking** tab.
+2. **Attach static IP** → create one (free while attached) → note the address,
+   e.g. `44.230.12.34`.
+3. Under **IPv4 Firewall**, **Add rule**: **HTTPS** (443). Add another: **HTTP** (80;
+   only used to get the certificate). Keep **SSH** (22).
+
+## 3. Get a free name at DuckDNS
+
+1. Go to **duckdns.org**, sign in (Google or GitHub).
+2. Type a name (e.g. `coopatrada`) → **add domain**.
+3. In the **current ip** box next to it, paste the static IP from step 2 → **update ip**.
+
+Your site will be `https://coopatrada.duckdns.org`. The IP never changes, so this
+never needs updating again.
+
+## 4. Install the code
+
+On the instance page click **Connect using SSH** (a terminal opens in the browser),
+then:
 
 ```bash
 sudo apt update && sudo apt install -y python3 python3-venv git
-sudo timedatectl set-timezone America/Denver   # only affects log timestamps
 git clone https://github.com/nickp3057/coopa-trada.git
 cd coopa-trada
-```
-
-(The repository is private: GitHub asks for your user name and a personal access
-token with read access. Or copy the folder over with `scp`.)
-
-## 3. Install the app as a service
-
-```bash
 bash packaging/server/install.sh
 ```
 
-This creates `.venv`, installs the pinned packages, creates `config/rules.yaml`
-and an empty `.env` (only your user can read it), and installs the
-`coopa-trada` service. The service starts on boot and restarts after a crash.
+The repository is private: when git asks, the user name is your GitHub name and the
+password is a **GitHub personal access token** (github.com → Settings → Developer
+settings → Fine-grained tokens → read access to `coopa-trada` → copy it).
 
-## 4. Fill in `.env`
-
-```bash
-nano .env
-```
-
-| Line | Value |
-|---|---|
-| `SCHWAB_API_KEY`, `SCHWAB_APP_SECRET` | From the Schwab Developer Portal (docs/SCHWAB_SETUP.md) |
-| `SCHWAB_CALLBACK_URL` | Exactly as registered at Schwab, normally `https://127.0.0.1:8182` |
-| `SCHWAB_ACCOUNT_ID` | The account to trade (recommended) |
-| `NTFY_TOPIC` | Your long random ntfy channel (COOPER_README section 2c). **On a server this is the only alert channel**: there are no Mac notifications. |
-| `ANTHROPIC_API_KEY` | For reading screenshots (console.anthropic.com) |
-| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS` | docs/TELEGRAM_SETUP.md |
-| `DASHBOARD_PASSWORD` | A long password (12+ characters) for the dashboard |
-| `LIVE_TRADING` | Leave `0` until the practice days look right |
-| `AUTO_START_LIVE` | Leave `0`; set to `1` (with `LIVE_TRADING=1`) when the automatic daily run should trade real money |
-
-Save with Ctrl-O, Enter, Ctrl-X. Then:
+## 5. Add each person
 
 ```bash
-sudo systemctl restart coopa-trada
-journalctl -u coopa-trada -n 30      # the last 30 log lines
+bash packaging/server/add-person.sh cooper 8771
+bash packaging/server/add-person.sh nick 8772
 ```
 
-## 5. Copy your settings and Schwab login (optional)
+Each one asks for that person's **website password** (12+ characters, twice), then
+shows a **QR code**. That person opens an authenticator app on their phone
+(Google Authenticator, Microsoft Authenticator, 1Password…), taps **+**, scans it, and
+types the 6-digit code to check it. If Cooper isn't with you, press Enter to skip the
+check and send him the setup key it prints, privately (he chooses "enter a setup key").
 
-If the Mac already has a working setup, copy `config/rules.yaml` and
-`schwab_token.json` from the Mac's app folder into `~/coopa-trada/` on the server
-(the Lightsail SSH window has an upload button), then restart the service. Copy
-`trada.db` too if positions are open, and **stop the Mac app first**: only one
-computer may run the bot for an account. Otherwise do the Schwab login in step 7.
-
-## 6. Reach the dashboard privately with Tailscale
-
-Tailscale makes a private network between your devices. The dashboard stays on
-the server's own `127.0.0.1` and is never exposed to the internet.
-
-1. Make a free account at tailscale.com and install Tailscale on your phone and
-   laptop (sign in on each).
-2. On the server:
-
-   ```bash
-   curl -fsSL https://tailscale.com/install.sh | sh
-   sudo tailscale up              # open the link it prints and approve the server
-   sudo tailscale serve --bg 8770
-   ```
-
-3. `tailscale serve` prints an address like `https://coopa-trada.tail1234.ts.net`.
-   Open it on your phone or laptop (with Tailscale on). The browser asks for the
-   dashboard password; any user name works.
-
-## 7. First Schwab login and weekly reconnect
-
-On the dashboard: **Reconnect Schwab** → **Open the Schwab login page** → log in →
-**Allow**. The page then fails to load (it points at `127.0.0.1:8182`). That is
-expected: copy the whole address from the address bar, paste it into the
-dashboard, click **Finish**. Repeat every week (the dashboard and your phone warn
-you 2 days ahead).
-
-## 8. Check it
+## 6. Fill in each person's settings
 
 ```bash
-.venv/bin/python -m coopa_trada readonly-check
+nano ~/coopa-data/cooper/.env
 ```
 
-It should print OK lines only (no account numbers or amounts). Then send a test
-alert from **Settings → Alerts**, and a test screenshot to the Telegram bot.
+| Line | Cooper's file | Your file |
+|---|---|---|
+| `SCHWAB_API_KEY`, `SCHWAB_APP_SECRET` | from **his** Schwab developer app | from **your** Schwab developer app |
+| `SCHWAB_CALLBACK_URL` | `https://127.0.0.1:8182` (as registered at Schwab) | same |
+| `SCHWAB_ACCOUNT_ID` | his account number | yours |
+| `ANTHROPIC_API_KEY` | your `coopa-trada` Claude key | same key |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS` | **his** bot, his chat ID | a second bot of your own, or leave blank |
+| `NTFY_TOPIC` | his alert channel | yours |
+| `LIVE_TRADING`, `AUTO_START_LIVE` | `0` until the practice days look right | same |
+
+Save with Ctrl-O, Enter, Ctrl-X, then restart that person's bot:
+
+```bash
+sudo systemctl restart coopa-trada@cooper
+```
+
+Leave `DASHBOARD_PASSWORD` blank: the login website handles logins. Each Telegram
+bot can serve only one person's copy, so make a second bot (docs/TELEGRAM_SETUP.md) if
+you want Telegram for yours too.
+
+## 7. Turn on HTTPS
+
+```bash
+bash packaging/server/setup-https.sh coopatrada.duckdns.org
+```
+
+After a minute, open **https://coopatrada.duckdns.org** on any phone or computer:
+the login page appears with a proper padlock.
+
+## 8. First Schwab login (each person, once a week)
+
+Log in to the website → Dashboard → **Reconnect Schwab** → **Open the Schwab login
+page** → log in with **your own** Schwab user → **Allow**. The page then fails to load
+(it points at `127.0.0.1:8182`); that's expected. Copy the whole address from the
+address bar, paste it into the dashboard, click **Finish**. Schwab requires this every
+7 days; the dashboard and the phone alerts warn 2 days ahead.
+
+## 9. Check it
+
+```bash
+cd ~/coopa-data/cooper && ~/coopa-trada/.venv/bin/python -m coopa_trada readonly-check
+```
+
+OK lines only (no account numbers or amounts). Then **Settings → Alerts → Send test
+alert**, and a test screenshot to the Telegram bot.
 
 ## Everyday
 
-Nothing to do. At 7:00 AM MT on trading days the run starts by itself, watches
-anything held from yesterday, buys when Cooper confirms the picks, and sells by the
-rules. The dashboard shows what it is doing. To stop a day: press **Stop** (it
-won't restart that day).
+Nothing. At 7:00 AM MT on trading days each bot starts its run, watches what it holds,
+buys when its picks are confirmed, and sells by its own settings.
 
-## Updating
+## Handy commands
 
-```bash
-cd ~/coopa-trada && git pull && bash packaging/server/install.sh
-```
-
-Not while a run is active during market hours; evenings or weekends are best.
-
-## If something goes wrong
-
-| Symptom | Check |
+| What | Command |
 |---|---|
-| Dashboard doesn't load | `sudo systemctl status coopa-trada`; `journalctl -u coopa-trada -n 50`; is Tailscale on on your device? |
-| "password required" every time | The password is `DASHBOARD_PASSWORD` in `.env`; restart the service after changing it |
-| No phone alerts | `NTFY_TOPIC` in `.env`; Settings → Alerts → Send test alert |
-| Telegram silent | docs/TELEGRAM_SETUP.md, Troubleshooting |
-| A real-money run did not shut down cleanly | After a crash or reboot mid-run: check the Reconcile page and Schwab, then **Clear stale lock** on the dashboard |
+| Is everything running? | `systemctl status coopa-gateway coopa-trada@cooper coopa-trada@nick caddy` |
+| A bot's log | `journalctl -u coopa-trada@cooper -n 50` (add `-f` to follow) |
+| Update the code | `cd ~/coopa-trada && git pull && bash packaging/server/install.sh` (not during market hours) |
+| New website password | `.venv/bin/python -m coopa_trada.gateway --config ~/coopa-data/gateway.yaml reset-password cooper` then `sudo systemctl restart coopa-gateway` |
+| New phone for the 6-digit codes | same, with `reset-2fa cooper` |
+| Remove a person | `sudo systemctl disable --now coopa-trada@NAME`, then `remove-user NAME` |
 
-**Backups.** `trada.db` is the trade log. Lightsail can take automatic daily
-snapshots of the whole server (instance → Snapshots → Enable automatic snapshots,
-a small extra monthly cost).
+Too many wrong tries locks a name for 15 minutes. A password or 2FA reset logs that
+person out everywhere.
+
+**Backups:** instance → **Snapshots** → **Enable automatic snapshots** (a small extra
+monthly cost). Everything that matters is in `~/coopa-data/`.

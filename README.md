@@ -112,9 +112,11 @@ The day's run starts automatically at 7:00 AM MT on trading days (`auto_start_da
 
 ## Running on a server
 
-`docs/SERVER_SETUP.md`: Ubuntu (e.g. AWS Lightsail), `packaging/server/install.sh`
-(venv + systemd service, restarts on failure), Tailscale for private access, and
-`DASHBOARD_PASSWORD` for an HTTP login (required to listen on anything but 127.0.0.1).
+`docs/SERVER_SETUP.md` (AWS Lightsail, Ubuntu). One bot per person
+(`coopa-trada@NAME`, each with its own data folder, `.env`, Schwab login, settings and
+trade log) behind a login website (`python -m coopa_trada.gateway`: password + TOTP
+2FA, lockout, signed session) with HTTPS from Caddy and a free DuckDNS name. Scripts:
+`packaging/server/install.sh`, `add-person.sh`, `setup-https.sh`.
 
 ## Picture reader and Telegram
 
