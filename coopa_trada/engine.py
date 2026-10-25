@@ -132,7 +132,7 @@ class Engine:
         self.cal = cal
         self.mode = mode
         self.quote_source = quote_source
-        self.sizer = sizer or FixedQuantitySizer(rules.max_dollars_per_position)
+        self.sizer = sizer or FixedQuantitySizer(rules.max_dollars_per_position, rules.contracts_per_pick)
         # Callable(now) -> schwab_token.TokenStatus; required whenever a
         # component talks to Schwab (see _needs_schwab_token).
         self.token_status = token_status
@@ -426,7 +426,8 @@ class Engine:
             qty = self.sizer.size(signal, contract, self.rules)
             if qty <= 0:
                 self._record_skip(signal, day, "spending_cap",
-                    f"1 contract exceeds spending cap (ask={contract.ask:.4f}, cap={self.rules.max_dollars_per_position:.2f})",
+                    f"{self.rules.contracts_per_pick} contract(s) exceed the per-pick cap "
+                    f"(ask={contract.ask:.4f}, cap={self.rules.max_dollars_per_position:.2f})",
                     {"ask": contract.ask, "mid": contract.mid, "cap": self.rules.max_dollars_per_position})
                 continue
             if contract.osi_symbol in self.store.halted_symbols(self.mode.value):
@@ -540,6 +541,11 @@ class Engine:
             return ExitPlan("entry_day", start, end, end, CompositeExit(keep), held_overnight=not expires_today)
         held_start = min(max(self.cal.resolve_time(day, self.rules.held_exit_start),
                              self.cal.session_open(day)), end)
+        if not self.rules.next_day_time_exit:
+            # Keep holding until a rule fires; an option is still sold on its expiration day.
+            expires_today = expiration is not None and expiration <= day
+            keep = [s for s in self.composite.strategies if not isinstance(s, HardTimeExit) or expires_today]
+            return ExitPlan("held", held_start, end, end, CompositeExit(keep), held_overnight=not expires_today)
         planned = self.cal.next_session(entry_day)
         if day > planned:
             return ExitPlan("overdue", held_start, end, held_start, self.composite, held_overnight=False)

@@ -118,6 +118,12 @@ class Rules:
     exit_reference_price: str = "mid_at_entry"
     # Start the day's run automatically at this Mountain time on trading days
     # (see autostart.py). 07:00 MT is 30 minutes before the open.
+    # Next trading day: sell anything still open at that day's exit-window end
+    # (at most one night held). False: keep holding until a rule fires (an
+    # option is still sold on its expiration day).
+    next_day_time_exit: bool = True
+    # Contracts bought per pick (the per-pick cap and the budget count them all).
+    contracts_per_pick: int = 1
     auto_start_daily: bool = True
     auto_start_time: time = time(7, 0)
     earliest_buy_minutes_before_close: int = 30
@@ -299,7 +305,16 @@ def load_rules(path: str | Path) -> Rules:
     except (ValueError, TypeError):
         raise ValueError('auto_start_time must be a Mountain-time HH:MM, for example "07:00"') from None
 
+    time_exit = data.get("next_day_time_exit", True)
+    if type(time_exit) is not bool:
+        raise ValueError("next_day_time_exit must be true or false")
+    per_pick = data.get("contracts_per_pick", 1)
+    if isinstance(per_pick, bool) or not isinstance(per_pick, int) or not 1 <= per_pick <= 100:
+        raise ValueError("contracts_per_pick must be a whole number from 1 to 100")
+
     return Rules(
+        next_day_time_exit=time_exit,
+        contracts_per_pick=per_pick,
         auto_start_daily=auto_daily,
         auto_start_time=auto_time,
         exit_reference_price=reference,

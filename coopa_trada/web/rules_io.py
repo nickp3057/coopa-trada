@@ -48,6 +48,8 @@ OPTIONAL_DEFAULTS = {
     "no_new_buys_minutes_before_close": 3,
     "exit_reference_price": "mid_at_entry",
     "auto_start_daily": True,
+    "next_day_time_exit": True,
+    "contracts_per_pick": 1,
     "auto_start_time": "07:00",
 }
 HOLD_NOTE = (
@@ -100,7 +102,9 @@ def _describe(key: str, values: dict) -> str:
     """One setting group's current value, in plain words."""
     if key == "spending_cap":
         cap = values.get("max_dollars_per_position")
-        return f"${float(cap):g} per pick, checked against ask × 100" if cap is not None else "not set"
+        n = values.get("contracts_per_pick", 1)
+        return (f"{n} contract{'s' if n != 1 else ''} per pick; skipped if that costs more than "
+                f"${float(cap):g} at ask × 100" if cap is not None else "not set")
     if key == "ten_percent_stop":
         return (f"drop from peak {_pct_text(values.get('cooper_drop_from_peak_pct'))}, "
                 f"drop from entry {_pct_text(values.get('cooper_drop_from_entry_pct'))}")
@@ -139,9 +143,12 @@ def _describe(key: str, values: dict) -> str:
                 else "no: only the take-profit can sell on the day of entry")
     if key == "next_day_exits":
         start = values.get("held_exit_start", "open")
-        return ("from the market open" if start == "open" else
+        when = ("from the market open" if start == "open" else
                 f"from {start} New York time" if isinstance(start, str) else
                 f"from {start} minutes before the close")
+        sell = ("anything still open is sold at the end of the next day's window"
+                if values.get("next_day_time_exit", True) else "held until a rule fires")
+        return f"every rule {when}; {sell}"
     if key == "profit_point_trail":
         points = values.get("profit_trail_points", OPTIONAL_DEFAULTS["profit_trail_points"])
         if points in (None, ""):
@@ -257,10 +264,15 @@ def _coerce_payload(payload: dict) -> dict:
             out[name] = int(value)
         except (TypeError, ValueError):
             raise RulesValidationError(f"{name} must be a whole number") from None
-    auto = payload.get("auto_start_daily", OPTIONAL_DEFAULTS["auto_start_daily"])
-    if type(auto) is not bool:
-        raise RulesValidationError("auto_start_daily must be true or false")
-    out["auto_start_daily"] = auto
+    for name in ("auto_start_daily", "next_day_time_exit"):
+        flag = payload.get(name, OPTIONAL_DEFAULTS[name])
+        if type(flag) is not bool:
+            raise RulesValidationError(f"{name} must be true or false")
+        out[name] = flag
+    try:
+        out["contracts_per_pick"] = int(payload.get("contracts_per_pick", OPTIONAL_DEFAULTS["contracts_per_pick"]))
+    except (TypeError, ValueError):
+        raise RulesValidationError("contracts_per_pick must be a whole number") from None
     out["auto_start_time"] = str(payload.get("auto_start_time") or OPTIONAL_DEFAULTS["auto_start_time"]).strip()
     out["exit_reference_price"] = payload.get("exit_reference_price", OPTIONAL_DEFAULTS["exit_reference_price"])
     out["rank_delta_source"] = payload.get("rank_delta_source", OPTIONAL_DEFAULTS["rank_delta_source"])

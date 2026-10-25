@@ -175,3 +175,17 @@ def test_budget_and_ranking_settings_validate(tmp_path):
     p = tmp_path / "legacy.yaml"
     p.write_text(base + "\nmax_concurrent_positions: 5\n")  # older files still load
     assert load_rules(p).total_budget == 300
+
+
+def test_more_contracts_per_pick_count_against_the_cap_and_budget(store):
+    # 2 contracts: AAA $1.00 -> $200, BBB $0.60 -> $120. Budget $300: AAA fits, BBB does not.
+    book = {"AAA": (1.00, 0.9), "BBB": (0.60, 0.8)}
+    engine(store, [pick("AAA"), pick("BBB")], book, contracts_per_pick=2)._entry_pass(DAY)
+    assert bought(store) == ["AAA"]
+    assert store.conn.execute("SELECT quantity FROM orders").fetchone()[0] == 2
+    assert "$120.00 at the ask, $100.00 of $300.00 left" in skips(store)["BBB"][1]
+    # $1.60 x 2 = $320 > the $300 per-pick cap.
+    with Store.open(":memory:") as other:
+        engine(other, [pick("CCC")], {"CCC": (1.60, 0.9)}, contracts_per_pick=2,
+               total_budget=1000)._entry_pass(DAY)
+        assert skips(other)["CCC"][0] == "spending_cap"

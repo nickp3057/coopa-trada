@@ -74,6 +74,10 @@ profit_trail_arm: from_entry
 #
 stops_on_entry_day: true
 held_exit_start: open
+# true: anything still open is sold at the end of the next trading day's exit
+# window (held at most one night). false: hold until a rule fires (an option is
+# still sold on its expiration day).
+next_day_time_exit: true
 
 # Cooper: $300 is the TOTAL budget (raise it later if trading is profitable):
 # the most all open positions together may cost, including ones held from
@@ -86,9 +90,11 @@ held_exit_start: open
 total_budget: 300
 rank_delta_source: schwab_live
 
-# Spending cap per pick (Cooper: also $300). Always buys exactly 1 contract; if
-# that contract costs more than this, the ticker is skipped entirely.
+# Per-pick cap ($300): if the contracts for one pick (contracts_per_pick) cost
+# more than this at the ask x 100, the pick is skipped entirely.
 max_dollars_per_position: 300
+# Contracts bought per pick (the per-pick cap and the budget count them all).
+contracts_per_pick: 1
 
 # Exit repricing (Cooper: if a sell doesn't fill in 1 minute, reprice it to the
 # current price). A real sell order still unfilled after

@@ -210,7 +210,7 @@ def test_status_lists_the_current_settings_in_plain_words(client, monkeypatch):
     status = client.get("/api/run/status").get_json()
     assert status["settings_error"] is None
     summary = {s["label"]: s["current"] for s in status["settings_summary"]}
-    assert "$1500 per pick" in summary["Per-pick cap"]
+    assert "costs more than $1500" in summary["Per-pick cap"]
     assert "$300 for all open positions" in summary["Total budget"]
     # Live is still refused, now because there is no Schwab login in the test.
     rv = client.post("/api/run/start", json={"live": True, "confirm": "ENABLE LIVE TRADING"})

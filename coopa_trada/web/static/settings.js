@@ -13,13 +13,13 @@ const PCT_OR_INT_FIELDS = [
   "earliest_buy_minutes_before_close", "no_new_buys_minutes_before_close", "poll_interval_seconds",
   "trailing_stop_pct", "hard_stop_loss_pct", "take_profit_pct",
   "total_budget", "max_dollars_per_position",
-  "exit_reprice_after_seconds", "exit_reprice_max_attempts",
+  "exit_reprice_after_seconds", "exit_reprice_max_attempts", "contracts_per_pick",
   "cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct",
   "profit_trail_points",
 ];
 const TEXT_FIELDS = ["profit_trail_arm", "held_exit_start", "rank_delta_source", "exit_reference_price",
   "auto_start_time"];
-const BOOL_FIELDS = ["stops_on_entry_day", "auto_start_daily"];
+const BOOL_FIELDS = ["stops_on_entry_day", "auto_start_daily", "next_day_time_exit"];
 const DELTA_NUMBERS = ["min_abs_delta", "max_abs_delta"];
 
 let saved = null; // last response from the server

@@ -179,3 +179,19 @@ def test_quoted_time_and_minutes_are_accepted(tmp_path):
 def test_hold_settings_default_to_stops_on_and_monitoring_from_the_open():
     rules = load_rules("config/rules.example.yaml")
     assert (rules.stops_on_entry_day, rules.held_exit_start) == (True, "open")
+
+
+def test_without_the_next_day_time_exit_a_position_keeps_rolling(store):
+    buy(store, WED)
+    eng, clock = engine(store, ny(THU, 9, 0), lambda now: 1.05, next_day_time_exit=False)
+    eng.run(THU)  # nothing fires Thursday: still held, the run ends cleanly
+    assert exits(store) == [] and len(store.open_positions()) == 1
+    plan = eng._exit_plan(FRI, AssetClass.SINGLE_NAME, WED, date(2026, 9, 18))
+    assert plan.kind == "held" and plan.held_overnight  # not "overdue" on Friday either
+
+
+def test_without_the_next_day_time_exit_an_option_is_still_sold_on_expiry(store):
+    buy(store, WED, expiration=THU)
+    eng, clock = engine(store, ny(THU, 9, 0), lambda now: 1.05, next_day_time_exit=False)
+    eng.run(THU)
+    assert exits(store) == ["HardTimeExit"]

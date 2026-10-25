@@ -99,6 +99,8 @@
       <label class="block">Next-day exits start (<code>open</code>, New York <code>HH:MM</code>, or minutes before close)
         <input name="held_exit_start" type="text">
       </label>
+      <label class="inline"><input type="checkbox" name="next_day_time_exit">
+        Sell anything still open at the end of the next trading day&rsquo;s exit window (hold at most one night)</label>
     </fieldset>
 
     <fieldset>
@@ -130,10 +132,13 @@
 
     <fieldset>
       <legend>Spending cap</legend>
-      <label class="block">Max dollars per position (skip gate &mdash; 1 contract per pick either way)
+      <label class="block">Contracts per pick
+        <input name="contracts_per_pick" type="number" min="1" max="100" step="1" required>
+      </label>
+      <label class="block">Per-pick cap ($): skip a pick that costs more than this
         <input name="max_dollars_per_position" type="number" min="0.01" step="0.01" required>
       </label>
-      <p class="hint">A pick is skipped when one contract at the ask &times; 100 costs more than this.</p>
+      <p class="hint">A pick is skipped when its contracts at the ask &times; 100 cost more than this.</p>
     </fieldset>
 
     <fieldset>
