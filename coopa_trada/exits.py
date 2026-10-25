@@ -31,6 +31,11 @@ __all__ = [
 ]
 
 
+# Float tolerance so a price exactly at a trigger counts as reaching it
+# (0.90 x 1.6 is 1.4400000000000002 in floating point; a $1.44 mid must count).
+_EPS = 1e-9
+
+
 @dataclass(frozen=True)
 class Quote:
     bid: float
@@ -93,7 +98,7 @@ class TrailingPeak:
 
     def check(self, pos: PositionState, quote: Quote, now: datetime) -> ExitDecision | None:
         trigger = pos.session_peak_mid * (1 - self.pct)
-        if quote.mid <= trigger:
+        if quote.mid <= trigger + _EPS:
             return ExitDecision(
                 strategy="TrailingPeak",
                 reason=f"mid {quote.mid:.4f} <= peak {pos.session_peak_mid:.4f} * (1 - {self.pct})",
@@ -136,7 +141,7 @@ class StopLoss:
 
     def check(self, pos: PositionState, quote: Quote, now: datetime) -> ExitDecision | None:
         trigger = pos.entry_price * (1 - self.pct)
-        if quote.mid <= trigger:
+        if quote.mid <= trigger + _EPS:
             return ExitDecision(
                 strategy="StopLoss",
                 reason=f"mid {quote.mid:.4f} <= entry {pos.entry_price:.4f} * (1 - {self.pct})",
@@ -157,7 +162,7 @@ class TakeProfit:
 
     def check(self, pos: PositionState, quote: Quote, now: datetime) -> ExitDecision | None:
         trigger = pos.entry_price * (1 + self.pct)
-        if quote.mid >= trigger:
+        if quote.mid >= trigger - _EPS:
             return ExitDecision(
                 strategy="TakeProfit",
                 reason=f"mid {quote.mid:.4f} >= entry {pos.entry_price:.4f} * (1 + {self.pct})",
@@ -169,8 +174,6 @@ class TakeProfit:
 
 
 PROFIT_TRAIL_ARMS = ("from_entry", "in_profit")
-# Float tolerance so an exact 10-point drop (e.g. $2.00 peak -> $1.90 on a $1 entry) counts.
-_EPS = 1e-9
 
 
 class ProfitPointTrail:

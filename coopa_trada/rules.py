@@ -25,6 +25,7 @@ __all__ = ["Rules", "load_rules", "PositionSizer", "FixedQuantitySizer", "DeltaF
 
 
 RANK_DELTA_SOURCES = ("schwab_live", "tvt")
+EXIT_REFERENCE_PRICES = ("mid_at_entry", "fill")
 
 
 @dataclass(frozen=True)
@@ -109,6 +110,12 @@ class Rules:
     # a fixed time, but only inside this window, counted back from the real close
     # (half days included): no buys before `earliest` (a guard against a list
     # confirmed hours early) and none at or after `no_new_buys`.
+    # The price the exit rules measure from. "mid_at_entry": the option's mid
+    # (halfway between bid and ask) when it was bought, so a wide bid-ask gap
+    # does not look like an instant loss (bought at a $1.00 ask with a $0.80 bid:
+    # the rules start from $0.90). "fill": the price actually paid (the ask).
+    # Profit and loss in the trade log always use the real fill prices.
+    exit_reference_price: str = "mid_at_entry"
     earliest_buy_minutes_before_close: int = 30
     no_new_buys_minutes_before_close: int = 3
     exit_reprice_after_seconds: int = 60
@@ -274,7 +281,12 @@ def load_rules(path: str | Path) -> Rules:
     if isinstance(reprice_max, bool) or not isinstance(reprice_max, int) or not 0 <= reprice_max <= 20:
         raise ValueError("exit_reprice_max_attempts must be a whole number from 0 to 20")
 
+    reference = data.get("exit_reference_price", "mid_at_entry")
+    if reference not in EXIT_REFERENCE_PRICES:
+        raise ValueError(f"exit_reference_price must be one of: {', '.join(EXIT_REFERENCE_PRICES)}")
+
     return Rules(
+        exit_reference_price=reference,
         exit_reprice_after_seconds=reprice_after,
         exit_reprice_max_attempts=reprice_max,
         total_budget=budget,

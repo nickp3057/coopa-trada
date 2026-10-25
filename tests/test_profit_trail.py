@@ -144,3 +144,63 @@ def test_settings_page_saves_the_rule(tmp_path):
     assert body["profit_trail_arm"] == "in_profit"
     assert load_rules(cfg).profit_trail_arm == "in_profit"
     assert client.post("/api/rules", json={**good, "profit_trail_arm": "never"}).status_code == 400
+
+
+# -- what the exit rules measure from ------------------------------------------------
+def _wide(store, reference):
+    """Bought at a $1.00 ask while the bid was $0.80 (mid $0.90): a 20% spread."""
+    sig = Signal("w", "AMD", Right.CALL, 100, date(2026, 9, 4), 1, AssetClass.SINGLE_NAME, NOW, "x")
+    rules = replace(load_rules("config/rules.example.yaml"), exit_reference_price=reference)
+    broker = DryRunBroker(store)
+    quotes = []
+    eng = Engine(source=SimpleNamespace(fetch=lambda day: []), resolver=SyntheticResolver(), broker=broker,
+                 store=store, rules=rules, cal=CalendarService(), mode=broker.mode,
+                 quote_source=lambda _: quotes.pop(0), now=lambda: NOW, sleep=lambda _: None)
+    store.record_signal(sig)
+    contract = replace(SyntheticResolver().resolve(sig), bid=0.80, ask=1.00, mid=0.90)
+    broker.place_entry(contract, 1, 1.00, signal_id=sig.id, day=DAY)
+    return eng, quotes
+
+
+def test_mid_at_entry_keeps_a_wide_spread_from_selling_at_once(store):
+    eng, quotes = _wide(store, "mid_at_entry")
+    quotes += [Quote(0.80, 1.00, 0.90)]                  # unchanged market
+    assert eng._exit_tick(DAY) == 0
+    state, _ = eng._positions_state(DAY)[0]
+    assert state.entry_price == 0.90                    # rules start from the mid
+    quotes += [Quote(1.34, 1.54, 1.44)]                  # +60% from the $0.90 mid
+    assert eng._exit_tick(DAY) == 1
+    row = store.position_report()[0]
+    assert (row["entry_price"], row["exit_price"]) == (1.00, 1.34)   # real prices in the log
+    assert row["realized_pnl"] == pytest.approx(34.0)
+
+
+def test_fill_reference_reproduces_the_instant_sell(store):
+    eng, quotes = _wide(store, "fill")
+    quotes += [Quote(0.80, 1.00, 0.90)]                  # -10% from the $1.00 paid
+    assert eng._exit_tick(DAY) == 1
+    assert store.conn.execute("SELECT strategy FROM exit_events").fetchone()[0] in (
+        "ProfitPointTrail", "TrailingPeak")
+
+
+def test_ten_point_rule_from_the_mid_before_any_gain(store):
+    eng, quotes = _wide(store, "mid_at_entry")
+    quotes += [Quote(0.72, 0.92, 0.82)]                  # $0.90 - 10% of $0.90 = $0.81: not yet
+    assert eng._exit_tick(DAY) == 0
+    quotes += [Quote(0.71, 0.91, 0.81)]
+    assert eng._exit_tick(DAY) == 1
+
+
+def test_older_orders_without_a_recorded_mid_use_the_price_paid(store):
+    eng, quotes = _wide(store, "mid_at_entry")
+    store.conn.execute("UPDATE orders SET entry_mid = NULL")
+    state, _ = eng._positions_state(DAY)[0]
+    assert state.entry_price == 1.00
+
+
+def test_exit_reference_setting_validates(tmp_path):
+    p = tmp_path / "r.yaml"
+    p.write_text(open("config/rules.example.yaml").read().replace(
+        "exit_reference_price: mid_at_entry", "exit_reference_price: last"))
+    with pytest.raises(ValueError, match="exit_reference_price"):
+        load_rules(p)

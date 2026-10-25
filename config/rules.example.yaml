@@ -21,6 +21,12 @@ exit_window:
   SINGLE_NAME: ["15:35", 2]     # from 3:35pm ET until 2 min before the close
   ETF:         [18, 1]          # from 18 min before close until 1 min before close
 
+# What the exit rules count as the entry price. mid_at_entry: the option's mid
+# (halfway between bid and ask) when it was bought, so a wide bid-ask gap is not
+# an instant loss (bought at a $1.00 ask, $0.80 bid: the rules start from $0.90).
+# fill: the price actually paid. The trade log always shows the real prices.
+exit_reference_price: mid_at_entry
+
 # Trailing stop: exit when mid retraces this fraction from the session peak.
 trailing_stop_pct: 0.25
 

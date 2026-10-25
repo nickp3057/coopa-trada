@@ -149,6 +149,9 @@ class Store:
 
         with self.transaction():
             columns = {r["name"] for r in self.conn.execute("PRAGMA table_info(orders)")}
+            if "entry_mid" not in columns:
+                # The option's mid (between bid and ask) when the buy was placed.
+                self.conn.execute("ALTER TABLE orders ADD COLUMN entry_mid REAL")
             if "reprice_attempt" not in columns:
                 # Exit repricing: 0 for the first sell order, n for its n-th replacement.
                 self.conn.execute("ALTER TABLE orders ADD COLUMN reprice_attempt INTEGER NOT NULL DEFAULT 0")
@@ -234,6 +237,7 @@ class Store:
         trading_day=None,
         replaces_order_id: int | None = None,
         reprice_attempt: int = 0,
+        entry_mid: float | None = None,
     ) -> int:
         """Insert a PENDING (or given-status) order row with its request JSON.
 
@@ -257,8 +261,8 @@ class Store:
                 INSERT INTO orders
                     (signal_id, intent, idempotency_key, mode, osi_symbol, side,
                      quantity, limit_price, status, created_at_utc, request_json, entry_order_id,
-                     trading_day, replaces_order_id, reprice_attempt)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     trading_day, replaces_order_id, reprice_attempt, entry_mid)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     signal_id,
@@ -276,6 +280,7 @@ class Store:
                     trading_day.isoformat() if hasattr(trading_day, "isoformat") else trading_day,
                     replaces_order_id,
                     int(reprice_attempt),
+                    entry_mid,
                 ),
             )
             return int(cur.lastrowid)
@@ -413,7 +418,8 @@ class Store:
             )
             SELECT * FROM (SELECT o.id AS order_id, o.signal_id, o.osi_symbol, o.mode,
                    o.limit_price, f.price AS entry_price, f.at_utc AS entry_at_utc,
-                   o.trading_day AS trading_day,
+                   o.trading_day AS trading_day, o.entry_mid AS entry_mid,
+                   p.peak_mid AS stored_peak,
                    f.qty - COALESCE((
                        SELECT SUM(xf.qty) FROM orders xo JOIN totals xf ON xf.order_id = xo.id
                        WHERE xo.intent = 'EXIT' AND xo.entry_order_id = o.id AND xo.mode = o.mode

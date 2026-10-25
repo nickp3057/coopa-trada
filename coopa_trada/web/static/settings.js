@@ -17,7 +17,7 @@ const PCT_OR_INT_FIELDS = [
   "cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct",
   "profit_trail_points",
 ];
-const TEXT_FIELDS = ["profit_trail_arm", "held_exit_start", "rank_delta_source"];
+const TEXT_FIELDS = ["profit_trail_arm", "held_exit_start", "rank_delta_source", "exit_reference_price"];
 const BOOL_FIELDS = ["stops_on_entry_day"];
 const DELTA_NUMBERS = ["min_abs_delta", "max_abs_delta"];
 

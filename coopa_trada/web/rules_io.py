@@ -46,6 +46,7 @@ OPTIONAL_DEFAULTS = {
     "exit_reprice_max_attempts": 5,
     "earliest_buy_minutes_before_close": 30,
     "no_new_buys_minutes_before_close": 3,
+    "exit_reference_price": "mid_at_entry",
 }
 HOLD_NOTE = (
     "Cooper's hold rule: if the take-profit is reached on the day of entry, sell that day; "
@@ -101,6 +102,10 @@ def _describe(key: str, values: dict) -> str:
     if key == "ten_percent_stop":
         return (f"drop from peak {_pct_text(values.get('cooper_drop_from_peak_pct'))}, "
                 f"drop from entry {_pct_text(values.get('cooper_drop_from_entry_pct'))}")
+    if key == "exit_reference":
+        ref = values.get("exit_reference_price", OPTIONAL_DEFAULTS["exit_reference_price"])
+        return ("the mid (halfway between bid and ask) at purchase, so a wide spread is not an "
+                "instant loss" if ref == "mid_at_entry" else "the price paid (the ask)")
     if key == "buy_window":
         early = values.get("earliest_buy_minutes_before_close", 30)
         late = values.get("no_new_buys_minutes_before_close", 3)
@@ -163,6 +168,7 @@ LABELS = {
     "profit_point_trail": "10-point rule",
     "ten_percent_stop": "Older 10% stops",
     "exit_repricing": "Unfilled sells",
+    "exit_reference": "Exit rules measure from",
 }
 
 
@@ -243,6 +249,7 @@ def _coerce_payload(payload: dict) -> dict:
             out[name] = int(value)
         except (TypeError, ValueError):
             raise RulesValidationError(f"{name} must be a whole number") from None
+    out["exit_reference_price"] = payload.get("exit_reference_price", OPTIONAL_DEFAULTS["exit_reference_price"])
     out["rank_delta_source"] = payload.get("rank_delta_source", OPTIONAL_DEFAULTS["rank_delta_source"])
     stops = payload.get("stops_on_entry_day", OPTIONAL_DEFAULTS["stops_on_entry_day"])
     if type(stops) is not bool:

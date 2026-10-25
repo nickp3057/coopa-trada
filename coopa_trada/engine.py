@@ -490,7 +490,7 @@ class Engine:
         sig_meta = {}
         for row in self.store.open_positions(self.mode.value):
             asset_class, expiration = self._signal_meta(row["signal_id"], sig_meta)
-            entry_price = float(row["entry_price"])
+            entry_price = self._exit_reference(row)
             entry_at = clock.parse_iso(row["entry_at_utc"])
             entry_day = (date.fromisoformat(row["trading_day"]) if row["trading_day"]
                          else clock.to_market(entry_at).date())
@@ -500,13 +500,23 @@ class Engine:
                 entry_price=entry_price,
                 entry_at=entry_at,
                 quantity=int(row["quantity"]),
-                session_peak_mid=max(entry_price, float(row["peak_mid"])),
+                # No price seen yet: the peak starts at the reference, not at the ask paid.
+                session_peak_mid=max(entry_price, float(row["stored_peak"])
+                                     if row["stored_peak"] is not None else entry_price),
                 asset_class=asset_class,
                 hard_exit_at=plan.hard_exit_at,
                 entry_order_id=row["order_id"],
             )
             out.append((state, row["signal_id"], plan))
         return out
+
+    def _exit_reference(self, row) -> float:
+        """The price the exit rules treat as the entry (``exit_reference_price``)."""
+        fill = float(row["entry_price"])
+        mid = row["entry_mid"]
+        if self.rules.exit_reference_price == "mid_at_entry" and mid is not None and 0 < mid <= fill:
+            return float(mid)
+        return fill  # "fill", or older orders recorded before the mid was kept
 
     def _exit_plan(self, day: date, asset_class, entry_day: date, expiration: date | None) -> "ExitPlan":
         """Which exits apply to a position today, and from when.

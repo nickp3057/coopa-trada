@@ -37,6 +37,16 @@
 
     <fieldset>
       <legend>Standard exits</legend>
+      <label class="block">Exit rules measure gains and losses from
+        <select name="exit_reference_price">
+          <option value="mid_at_entry">the mid at purchase (recommended: a wide bid&ndash;ask gap is not an instant loss)</option>
+          <option value="fill">the price paid (the ask)</option>
+        </select>
+      </label>
+      <p class="hint">Example: quoted $0.80 bid / $1.00 ask, bought at $1.00. Measured from the
+        mid, the rules start at $0.90 (take-profit +60% = $1.44, 10-point rule $0.81 before any
+        gain). Measured from the price paid, the position starts at &minus;10% and the 10-point
+        rule would sell it right away. The trade log always shows the real prices paid and received.</p>
       <label class="block">Trailing stop (fraction retraced from peak, 0&ndash;1)
         <input name="trailing_stop_pct" type="number" min="0" max="0.999" step="0.01" required>
       </label>

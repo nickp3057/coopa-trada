@@ -100,6 +100,7 @@ class _BrokerBase:
         recover: Callable[[int, Exception, datetime], OrderResult | None] | None = None,
         replaces_order_id: int | None = None,
         reprice_attempt: int = 0,
+        entry_mid: float | None = None,
     ) -> OrderResult:
         with self.store.transaction():
             legacy_key = make_key(signal_id, intent, day)
@@ -152,6 +153,7 @@ class _BrokerBase:
                 created_at=self.now(),
                 replaces_order_id=replaces_order_id,
                 reprice_attempt=reprice_attempt,
+                entry_mid=entry_mid,
             )
 
         submitted_at = clock.now_utc()
@@ -369,6 +371,7 @@ class SchwabBroker(_BrokerBase):
             do_call=do_call,
             fill_price=None,  # live fills arrive via reconcile / order status, not synthesized
             recover=self._recover,
+            entry_mid=contract.mid,
         )
 
     def place_exit(self, position, limit_price, decision, *, signal_id, day,
@@ -565,6 +568,7 @@ class DryRunBroker(_BrokerBase):
             request=request,
             do_call=do_call,
             fill_price=fill_price,
+            entry_mid=contract.mid,
         )
         self._stamp_dry_id(result)
         return result
