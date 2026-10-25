@@ -1,18 +1,45 @@
 # Project state — Coopa Trada
 
-_Last updated: 2026-10-22_
+_Last updated: 2026-10-25_
 
-Local Python/Flask app for Cooper's FOMC Picks, packaged as a double-click macOS
-app and now also runnable on a server. Cooper answered his rule questions on
-2026-10-22; this session implemented them. Simulation remains the default, every
-new setting is **unconfirmed** (so live runs stay blocked until Nick/Cooper tick
-them in Settings), and **no live order has ever been placed**. The only real Schwab
-request so far is still Nick's login (2026-10-16).
+Python/Flask app that trades Cooper's daily FOMC option picks through Schwab. It runs
+as a double-click macOS app or as a service on a Linux server
+(docs/SERVER_SETUP.md). Picks arrive as screenshots by Telegram (or dashboard upload),
+are read by Claude (or Apple Vision on a Mac), previewed, and bought on confirmation.
+Every trading choice is an ordinary setting with a working default; nothing waits
+for sign-off. Simulation remains the default and **no live order has ever been
+placed**. The only real Schwab request so far is still Nick's login (2026-10-16).
 
-The plain-English rulebook for Cooper, with dollar examples and the open yes/no
-questions, is **`docs/HOW_IT_TRADES.md`**.
+The plain-English rulebook, with dollar examples and every setting, is
+**`docs/HOW_IT_TRADES.md`**.
 
-## Session summary (2026-10-22)
+## Session summary (2026-10-25)
+
+On `claude/gracious-einstein-a30t1n`, one commit each (373 tests passing):
+
+- **Cooper confirmation checks removed** (`b45ef1d`). Settings are plain settings;
+  the dashboard's live panel lists them in plain words. Live runs still need
+  `LIVE_TRADING=1`, the typed phrase (or `AUTO_START_LIVE=1`), a valid rules file
+  and a Schwab login covering the hold. Old `setting_confirmations` blocks are ignored.
+- **Spread fix** (`b66e116`): `exit_reference_price` (default `mid_at_entry`) makes
+  the exit rules measure from the mid at purchase, so a wide bid–ask gap is not an
+  instant loss. Price triggers count an exact hit (float tolerance).
+- **Automatic daily start** (`50f1c12`): 7:00 AM MT on trading days; practice unless
+  `LIVE_TRADING=1` and `AUTO_START_LIVE=1`; a run started or stopped by hand that day is
+  left alone; one attempt per day.
+- **Server-ready** (`efcc10f`): `DASHBOARD_PASSWORD` (HTTP login, required off
+  127.0.0.1), Tailscale-proxy-safe origin check, quiet keep-awake on Linux, calendar
+  expiry warning 60 days ahead, `packaging/server/` (systemd unit, install script
+  tested in a scratch copy), `docs/SERVER_SETUP.md`.
+- **Last open questions as settings** (`1197daf`): `next_day_time_exit` (sell at the
+  end of the next day; default yes) and `contracts_per_pick` (default 1).
+- Docs: HOW_IT_TRADES has a full settings table instead of questions; COOPER_README
+  and README describe the automatic start and server use.
+
+Hosting: a 1 GB Linux server (AWS Lightsail, DigitalOcean, Hetzner), about $5–12 a
+month, on 24/7, reached privately over Tailscale.
+
+## Session summary (2026-10-22): Cooper's rules
 
 One branch and one commit per task, stacked in order (each branch contains the
 ones before it); `claude/gracious-einstein-a30t1n` was fast-forwarded to the last one.
@@ -132,36 +159,29 @@ run is accepted; the unknown-order test gets budget for both picks.
 
 ## Known issues / risks
 
-- **Spread vs the 10-point rule:** the bot buys at the ask but judges by the mid.
-  With `from_entry` arming and stops on the entry day, an option whose bid-ask gap is
-  about 20% of its price or more starts at about −10% and is sold on the first check
-  (e.g. $0.80/$1.00: pays $1.00, sells at $0.80). Cooper's questions 1 and 2 decide it.
-- **The day's run must be started by a person** (ideally before the open when
-  something is held). Telegram confirmation does not start a run; the bot's reply
-  says when no run is active, and the watchdog alerts on unwatched real positions.
-- Telegram previews are kept in memory: a restart loses pending previews (Cooper
-  resends the screenshot).
-- **Market calendar expires** at the session of 2027-10-15 (`exchange_calendars`).
+- Every real Schwab call except the login is still untested (quotes, chains, orders,
+  cancels). Run `python -m coopa_trada readonly-check`, then a practice day on real
+  quotes, then a supervised live day with one cheap contract before unattended use.
+- Real Claude API and Telegram Bot API calls have only run against mocks.
+- The macOS app has not been rebuilt since these changes (it needs `anthropic`).
+- Telegram previews live in memory: a restart loses pending previews (resend).
+- The bundled market calendar ends at the session of 2027-10-15; the watchdog alerts
+  60 days before. Update `exchange-calendars` then.
 
 ## Next steps
 
-1. Nick: `python -m coopa_trada readonly-check` on the Mac; report only OK/FAILED lines.
-2. Cooper: answer the 11 questions at the end of `docs/HOW_IT_TRADES.md`; tick the
-   confirmed settings in Settings.
-3. Nick: Telegram bot (docs/TELEGRAM_SETUP.md) and `ANTHROPIC_API_KEY` in `.env`; send
-   a test screenshot.
-4. A supervised dry-run day on real quotes, then supervised live checks of the order
-   lifecycle (buy, sell, a forced reprice) with one cheap contract.
-5. Rebuild the macOS app; server prep (systemd, Tailscale) as listed before.
+1. Set up the server (docs/SERVER_SETUP.md) or keep the Mac; fill in `.env`.
+2. `python -m coopa_trada readonly-check`; Telegram bot (docs/TELEGRAM_SETUP.md).
+3. A few practice days on real quotes (automatic start, Telegram confirm).
+4. Supervised live checks with one cheap contract (buy, sell, a forced reprice), then
+   `LIVE_TRADING=1` (and `AUTO_START_LIVE=1` for unattended days).
 
 ## Validation
 
-**360 automated tests pass** (249 at the start of this session)
-(`.venv/bin/python -m pytest`). New suites: `test_readonly_check`, `test_profit_trail`,
-`test_hold_logic`, `test_sizing`, `test_exit_repricing`, `test_entry_timing`,
-`test_vision`, `test_telegram`. `packaging/verify_app.py --source` passes inside the
-suite. A browser check (Playwright, headless Chromium) loaded Settings and the
-Dashboard with no JavaScript errors and saved a confirmation.
+**373 automated tests pass** (249 before 2026-10-22). `packaging/verify_app.py --source`
+passes inside the suite; a headless-browser check loaded Settings and the Dashboard
+without JavaScript errors; `packaging/server/install.sh` was run in a scratch copy
+(with `sudo` stubbed) and the installed copy served the dashboard.
 
 ## Earlier sessions (reference)
 

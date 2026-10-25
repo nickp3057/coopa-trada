@@ -2,26 +2,26 @@
 
 This is the plain-English rulebook: when the bot buys, what it buys, how much it
 spends, and every reason it sells. The dollar examples use the settings it ships
-with. Every setting can be changed on the **Settings** page. The ones marked
-**(unconfirmed)** still need your yes or no, and real-money trading stays switched
-off until every one of them is confirmed.
+with. Every choice is a setting on the **Settings** page; the table at the end
+lists them all with their defaults.
 
-All times are **Mountain time (MT)**. A normal market day closes at **2:00 PM MT**.
+All times are **Mountain time (MT)**. A normal market day opens at **7:30 AM MT**
+and closes at **2:00 PM MT**.
 
 ---
 
 ## 1. When it buys
 
-1. Before your picks arrive, Nick (or you) starts **the day's run** on the
-   dashboard. Starting it before the market opens (7:30 AM MT) is best, because the
-   same run also watches anything held from yesterday (section 4).
-2. Your picks arrive between **1:40 and 1:55 PM**. You forward the screenshot to the
-   Telegram bot, or upload it on the dashboard.
-3. The bot reads it and shows every pick. **Nothing is bought until you press
-   Confirm.**
-4. The moment you confirm, the run buys. There is no fixed buying time.
+1. At **7:00 AM MT** on every trading day the day's run **starts by itself**
+   (nobody has to press Start). It watches anything held from yesterday (section 4)
+   and waits for the picks.
+2. Cooper's picks arrive between **1:40 and 1:55 PM**. He forwards the screenshot
+   to the Telegram bot, or uploads it on the dashboard.
+3. The bot reads it and shows every pick. **Nothing is bought until someone presses
+   Confirm** (in Telegram or on the dashboard).
+4. The moment the list is confirmed, the run buys. There is no fixed buying time.
 
-The buying window **(unconfirmed)**:
+The buying window:
 
 - **No buys before 1:30 PM.** This guards against a list confirmed hours early by
   mistake. A list confirmed at 11 AM waits until 1:30 PM.
@@ -33,32 +33,29 @@ The buying window **(unconfirmed)**:
 Other buying rules:
 
 - The trade date on the list must be today. Telegram refuses any other date.
-- If you confirm a corrected list later the same day, it **replaces** the earlier
-  one. Anything already bought stays bought; picks that were only on the old list
-  are no longer bought.
-- If a buy order hasn't filled by the end of that pick's exit window (1:58 PM MT for
-  stocks, 1:59 PM MT for ETFs), it is canceled.
+- Confirming a corrected list later the same day **replaces** the earlier one.
+  Anything already bought stays bought; picks that were only on the old list are no
+  longer bought.
+- A buy order that hasn't filled by the end of that pick's exit window (1:58 PM MT for
+  stocks, 1:59 PM MT for ETFs) is canceled.
 
 ## 2. What it buys, and in what order
 
-- **One contract per pick**, always (never 2 or 3 of the same option).
-- The picks are **ranked by delta, highest first**. By default it uses
-  **Schwab's live delta** at the moment of buying **(unconfirmed)**; the other
-  choice is the TVT delta from your screenshot. Puts count by size (−0.70 ranks
-  above 0.55). A pick with no delta goes to the end of the line.
-- It buys down the list while each pick still **fits the budget** (section 3).
-  A pick that doesn't fit is skipped, and the bot still tries the cheaper ones
-  after it.
+- **One contract per pick** (setting: contracts per pick).
+- The picks are **ranked by delta, highest first**, using **Schwab's live delta**
+  at the moment of buying (the other choice is the TVT delta from the screenshot).
+  Puts count by size (−0.70 ranks above 0.55). A pick with no delta goes last.
+- It buys down the list while each pick still **fits the budget** (section 3). A pick
+  that doesn't fit is skipped, and the bot still tries the cheaper ones after it.
 - Every skipped pick is written in the log with the reason (too expensive, doesn't
   fit the budget, after the cutoff, option not trading, and so on).
 
 ## 3. How much it spends
 
-- **Total budget: $300** **(unconfirmed)**. This is the most that everything open
-  may cost **together**: today's buys, positions held from yesterday, and buy
-  orders still waiting to fill. Costs are counted at the **ask × 100** (what one
-  contract costs to buy).
-- **Per-pick cap: $300.** A single contract that costs more than $300 is skipped.
+- **Total budget: $300.** The most that everything open may cost **together**:
+  today's buys, positions held from yesterday, and buy orders still waiting to fill.
+  Costs are counted at the **ask × 100** (what one contract costs to buy).
+- **Per-pick cap: $300.** A pick whose contract costs more than $300 is skipped.
 - There is **no limit on how many positions** it holds; the budget is the only limit.
 
 **Worked example.** Budget $300, nothing held from yesterday. Four picks arrive:
@@ -80,121 +77,108 @@ $50 would be left today, so neither BBB nor AAA would fit and nothing would be b
 
 ## 4. Every reason it sells
 
-The bot checks prices every 30 seconds. It decides on the **midpoint** between
-the bid and the ask (the "mid"), and sells with a limit order at the **bid** (what
-buyers are paying right now). Several rules watch at once; **whichever fires first
-wins**.
+The bot checks prices every 30 seconds. It judges on the **mid** (halfway between
+the bid and the ask) and sells with a limit order at the **bid** (what buyers are
+paying right now). Several rules watch at once; **whichever fires first wins**.
+
+**What counts as the buy price for the rules.** The rules measure from the **mid at
+the moment of buying**, not from the ask paid. Example: an option quoted $0.80 bid /
+$1.00 ask is bought at $1.00; its mid is $0.90, so the rules start at $0.90. That way
+a wide bid–ask gap doesn't look like an instant 10% loss that would trigger a sale
+straight away. The trade log always shows the real prices paid and received. (The
+other choice, "the price paid", measures from the $1.00.)
 
 ### Day of purchase
 
-- **Take profit: +60%.** Bought at $1.00 → sells when the mid reaches **$1.60**.
-  If this happens the same day, it sells the same day.
-- **Stops (unconfirmed: "stops on the day of entry", currently yes).** The stop-type
-  rules below also protect the position on the day it is bought. If you answer
-  no, only the take-profit can sell on the day of purchase.
-- If no rule fires by the end of the exit window, the position is **held
+- **Take profit: +60%.** Bought at a $1.00 mid → sells when the mid reaches **$1.60**,
+  the same day.
+- **Stops also protect the position on the day it is bought** (hard stop, trailing
+  stops, the 10-point rule). Switch this off to let only the take-profit sell on the
+  day of purchase.
+- If nothing fires by the end of the exit window, the position is **held
   overnight** and rolls to the next trading day.
 - Exception: an option that **expires today** can't be held, so it is sold at the
   end of today's exit window.
 
 ### Next trading day
 
-Every rule applies, **from the market open (7:30 AM MT)** **(unconfirmed)**, and
-anything still open is **sold at the end of that day's exit window** (1:58 PM MT
-for stocks, 1:59 PM MT for ETFs). A Friday buy rolls to Monday; holidays are
-skipped. If a position somehow misses its next-day sale (for example the computer
-was off), it is sold at the start of the following day's monitoring.
+Every rule applies **from the market open (7:30 AM MT)**, and anything still open is
+**sold at the end of that day's exit window** (1:58 PM MT for stocks, 1:59 PM MT for
+ETFs), so nothing is held more than one night. A Friday buy rolls to Monday; holidays
+are skipped. If a position misses its next-day sale (for example the server was
+off), it is sold at the start of the following day's watching. (Setting: switch the
+next-day sale off to keep holding until a rule fires; an option is still sold on its
+expiration day.)
 
-### The rules (bought at $1.00 in every example)
+### The rules (bought at a $1.00 mid in every example)
 
 | Rule | Sells when | Example |
 |---|---|---|
 | **Take profit** | mid is 60% above the buy price | mid reaches $1.60 |
-| **Your 10-point rule** (profit-point trail) | profit falls 10 percentage points below its best | best $2.00 (+100%) → sells at **$1.90** (+90%) |
+| **10-point rule** (profit-point trail) | profit falls 10 percentage points below its best | best $2.00 (+100%) → sells at **$1.90** (+90%) |
 | **Hard stop** | mid is 40% below the buy price | mid falls to $0.60 |
 | **Trailing stop 25%** | mid falls 25% from its highest | highest $2.00 → sells at $1.50 |
-| **Old "10% from the high"** (from before your answer) | mid falls 10% from its highest | highest $2.00 → sells at $1.80 |
+| **10% from the high** (older reading of the 10% rule) | mid falls 10% from its highest | highest $2.00 → sells at $1.80 |
 | **Time exit** (next trading day only) | end of the next day's exit window | 1:58 PM MT |
 
-**Your 10-point rule, more examples.** The trigger is *highest price − 10% of
-what you paid*:
+**The 10-point rule, more examples.** The trigger is *highest price − 10% of the buy
+price*:
 
 - Bought $1.00, highest $2.00 (+100%) → sells at **$1.90** (+90%).
 - Bought $2.50, highest $3.00 (+20%) → sells at **$2.75** (+10%). (Not $2.70: it is
   10 points of *profit*, not 10% of the high.)
-- Bought $1.00, never went up → **"from entry"** (current setting,
-  **unconfirmed**): sells at **$0.90**, so before any gain it works like a −10%
-  stop. With **"only once in profit"** it doesn't act until the price has been above
-  $1.00 at least once.
+- Bought $1.00, never went up → sells at **$0.90**: before any gain it works like a
+  −10% stop. (Setting: "only once in profit" waits until the price has been above
+  the buy price at least once.)
 
-Because your 10-point rule is always at or above the old "10% from the high"
-trigger, the old rule only matters if you switch the 10-point rule to "only once in
-profit" (then the old rule would still act as a −10% stop). See question 3.
+The 10-point rule's trigger is never below the "10% from the high" trigger, so that
+older rule only matters if the 10-point rule is switched to "only once in profit" or off.
 
-**An important side effect of "from entry" plus "stops on the day of entry":** the
-bot buys at the **ask** but judges by the **mid**, which is lower by half the
-bid–ask gap. On an option quoted $0.80 bid / $1.00 ask, it pays $1.00 and the mid
-is already $0.90, which is −10%. So the 10-point rule would sell it within 30
-seconds, at the $0.80 bid, for a $20 loss per contract. For a gap of about 20% of the
-price or more, that happens to almost every buy. Narrow gaps (most liquid options)
-are not affected. Questions 1 and 2 decide this.
+### If a sell order doesn't fill
 
-### If a sell order doesn't fill (unconfirmed)
+A real sell order still waiting after **60 seconds** is canceled and replaced at the
+**current bid**, up to **5 times**. It only ever lowers the price and never uses a
+market order. After the 5th try the order stays at its last price and you get a phone
+alert.
 
-A sell order still waiting after **60 seconds** is canceled and replaced at the
-**current bid**, up to **5 times**. Only ever lower, never a market order. After the
-5th try it stays at its last price and you get an alert on your Mac and phone.
-
-Example: sell order at $1.40 doesn't fill. A minute later the bid is $1.35: the bot
-cancels, waits for Schwab to confirm the cancel, then places a new order at $1.35.
-If the $1.40 order filled in the meantime, nothing more is sold. If half of it
-filled (2 contracts, 1 filled), the new order is for the 1 that's left.
+Example: a sell order at $1.40 doesn't fill. A minute later the bid is $1.35. The bot
+cancels, waits for Schwab to confirm the cancel, then places a new order at $1.35. If
+the $1.40 order filled in the meantime, nothing more is sold. If it was 2 contracts
+and 1 filled, the new order is for the 1 that's left.
 
 ## 5. What it never does
 
-- Buy before you confirm, or buy a list that isn't for today.
-- Spend more than the budget, or more than $300 on one contract.
+- Buy before a list is confirmed, or buy a list that isn't for today.
+- Spend more than the budget, or more than the per-pick cap on one pick.
 - Use market orders.
-- Resend an order it is unsure about (it stops trading that option and asks a
-  person).
-- Trade real money unless Nick has switched real trading on, **every** setting
-  below is confirmed, and someone types the confirmation phrase.
+- Resend an order it is unsure about (it stops trading that option and asks a person).
+- Trade real money unless real trading is switched on in the server's `.env`
+  (`LIVE_TRADING=1`). Even then, a run only trades real money when someone starts a
+  live run and types the confirmation phrase, or when automatic live starts are also
+  switched on (`AUTO_START_LIVE=1`).
 
 ---
 
-## Settings still waiting for your answer
+## Every setting (Settings page)
 
-Reply with eleven yes/no answers, for example **"1 yes, 2 yes, 3 no, …"**. A "no" means
-we change it to the alternative in brackets.
-
-1. **10-point rule from entry:** should your 10-point rule work from the moment of
-   purchase, acting like a −10% stop before any gain? (No = only once the position
-   has been in profit.)
-2. **Stops on the day of purchase:** should the stop-type rules (10-point rule,
-   −40% hard stop, 25% trailing stop) also be able to sell on the day of purchase?
-   (No = only the +60% take-profit can sell that day.)
-3. **Old "10% from the high" rule:** keep it switched on alongside your 10-point
-   rule? (No = turn it off; your 10-point rule replaces it.)
-4. **Total budget $300:** should everything open together, yesterday's positions
-   included, be limited to $300 at the ask? (No = tell us the amount.)
-5. **Per-pick cap $300:** skip any single contract costing more than $300?
-   (No = tell us the amount.)
-6. **Rank by Schwab's live delta:** rank picks using Schwab's delta at buying time?
-   (No = use the TVT delta from your screenshot.)
-7. **Next-day watching from the open:** on the day after purchase, should the stops
-   and take-profit work from the 7:30 AM MT open? (No = only during the afternoon
-   exit window, from 1:35 PM MT.)
-8. **Next-day final sale:** sell anything still open at the end of the next day's
-   exit window (about 1:58 PM MT), so nothing is held more than one night?
-   (No = keep holding until a rule fires.)
-9. **Sell-order repricing:** if a sell doesn't fill in 60 seconds, move it to the
-   current bid, up to 5 times, then alert you? (No = tell us a different number of
-   tries.)
-10. **Buying window 1:30–1:57 PM MT:** buy only between 1:30 and 1:57 PM MT, earlier
-    on half days? (No = tell us the times.)
-
-11. **No delta filter:** buy every pick on your list regardless of its delta
-    (your list is treated as already screened)? (No = tell us the delta range to keep.)
-
-One more, with no setting yet: should it ever buy **more than one contract** of a
-pick when the budget allows? Today the answer is never.
+| Setting | Default | Other choices |
+|---|---|---|
+| Start the day's run automatically | on, 7:00 AM MT | off, or another time |
+| Earliest buy | 30 min before the close (1:30 PM MT) | any number of minutes |
+| No new buys after | 3 min before the close (1:57 PM MT) | any number of minutes |
+| Rank picks by | Schwab's live delta | TVT delta from the screenshot |
+| Contracts per pick | 1 | 1–100 |
+| Total budget | $300 | any amount |
+| Per-pick cap | $300 | any amount |
+| Delta filter | off (buy every pick) | a delta range to keep |
+| Exit rules measure from | the mid at purchase | the price paid |
+| Take profit | +60% | any % |
+| Hard stop | −40% | any % |
+| Trailing stop | 25% from the high | any % |
+| 10-point rule | 10 points, from entry | other points, "only once in profit", or off |
+| 10% from the high | on, 10% | another %, or off |
+| Stops on the day of purchase | yes | no (only the take-profit sells that day) |
+| Next-day watching starts | market open | a time, or minutes before the close |
+| Sell everything at the end of the next day | yes | no (hold until a rule fires) |
+| Unfilled sells | reprice after 60 s, up to 5 times | other numbers; 0 = off |
+| Exit windows | stocks 1:35–1:58 PM MT, ETFs 1:42–1:59 PM MT | other times |

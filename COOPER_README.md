@@ -113,11 +113,15 @@ happened and where to look. The same alert is repeated at most every 6 hours
 
 The full trading rules, with dollar examples, are in **docs/HOW_IT_TRADES.md**.
 
-1. **Open the app** (double-click it) **before the market opens** (7:30 AM MT) if
-   anything was held overnight, otherwise any time before 1:30 PM MT. The Dashboard opens.
-2. **Check Schwab**: it should say **Connected** (or **Expiring soon**; see section 4).
-3. **Start the run**: click **Start today's run (dry‑run)**. The run watches anything
-   held from yesterday and waits for today's picks. The status line says what it's doing.
+On a server (docs/SERVER_SETUP.md) steps 1 and 2 happen by themselves; skip to step 3.
+
+1. **Open the app** (double-click it) before 7:00 AM MT, or any time before 1:30 PM MT.
+   The Dashboard opens.
+2. **The run starts by itself** at 7:00 AM MT on trading days (or straight away if the
+   app is opened later). It watches anything held from yesterday and waits for today's
+   picks; the status line says what it's doing. (Settings → Buying window can change
+   the time or switch this off; then click **Start today's run** yourself.)
+3. **Check Schwab**: it should say **Connected** (or **Expiring soon**; see section 4).
 4. **Send the picks** when they arrive (1:40–1:55 PM MT), either way:
    - **Telegram** (if set up, see docs/TELEGRAM_SETUP.md): forward the screenshot to the
      bot, check the list it sends back, press **✅ Confirm**.
@@ -156,7 +160,6 @@ watching, and anything it bought just sits there.
 Real trading needs all of these, every time:
 
 - `LIVE_TRADING=1` in the `.env` file (Nick changes this with you);
-- every setting on the **Settings** page ticked **Confirmed with Cooper**;
 - **Schwab: Connected**;
 - under **Enable live trading**, open **Show the live‑run control**, type
   **ENABLE LIVE TRADING** exactly, and click **Start a LIVE run**.
@@ -202,13 +205,10 @@ Friday morning**, then a Friday run is always covered.
 | **Schwab: Not set up** | No login saved yet, or the settings file is missing | Do section 2 |
 | **Red banner: orders need your attention** | The bot sent an order but could not confirm whether Schwab received it. It did **not** resend it, and it stopped trading that option. | Open **Reconcile**, check **Orders** in your Schwab app, then click what you found |
 | **"A previous run did not shut down cleanly"** | The app or Mac stopped during a real run | Check **Reconcile** and your Schwab positions, then click **Clear stale lock** |
-| **Live runs are blocked: these settings are not confirmed** | Settings still need your OK | Go through **Settings** with Nick |
 
-On the **Settings** page, **Unconfirmed** badges mark the choices waiting for your
-decision (the budget, the 10-point rule, hold and stop timing, sell repricing, the
-buying window, and more; the questions are at the end of docs/HOW_IT_TRADES.md). Real trading stays off until
-each one is ticked **Confirmed with Cooper**. Changing a confirmed value un-ticks
-it, so you have to confirm the new value.
+The **Settings** page holds every trading choice (budget, the 10-point rule, hold and
+stop timing, sell repricing, the buying window, the daily start, and more). Each has a
+working default; the full list with examples is at the end of docs/HOW_IT_TRADES.md.
 
 ---
 

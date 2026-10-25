@@ -98,17 +98,23 @@ The dashboard's **Stop** stops monitoring; it does not liquidate positions or
 cancel all outstanding broker orders. Treat it as stopping the program, not as an
 emergency sell button.
 
-## Cooper's decisions are still required
+## Settings
 
-Every Cooper-facing setting has a marker under `setting_confirmations` in
-`config/rules.yaml` (spending cap, 10% stop basis, delta filter, profit-point trail,
-entry-day stops, next-day exit start, total budget, delta ranking, exit repricing,
-buying window). **Any unconfirmed marker blocks live runs; dry runs are never
-blocked.** `Engine.run` enforces this, so it applies to the CLI and the dashboard
-alike. Settings shows an Unconfirmed badge and a Confirm checkbox for each, and the
-dashboard's live panel lists whatever is still unconfirmed. Changing a confirmed
-setting's value resets its marker unless the same save re-confirms it. The questions
-for Cooper are at the end of `docs/HOW_IT_TRADES.md`.
+Every trading choice is an ordinary setting with a working default, edited on the
+Settings page or in `config/rules.yaml` (validated on load either way); the full list
+with dollar examples is at the end of `docs/HOW_IT_TRADES.md`. Nothing waits for
+anyone's sign-off. Older rules files with a `setting_confirmations` block still load;
+the block is ignored and dropped on the next save.
+
+The day's run starts automatically at 7:00 AM MT on trading days (`auto_start_daily`,
+`auto_start_time`). It is a practice run unless the environment has both
+`LIVE_TRADING=1` and `AUTO_START_LIVE=1`.
+
+## Running on a server
+
+`docs/SERVER_SETUP.md`: Ubuntu (e.g. AWS Lightsail), `packaging/server/install.sh`
+(venv + systemd service, restarts on failure), Tailscale for private access, and
+`DASHBOARD_PASSWORD` for an HTTP login (required to listen on anything but 127.0.0.1).
 
 ## Picture reader and Telegram
 
@@ -190,7 +196,7 @@ python -m coopa_trada resolve --signals data/signals.example.csv --date 2026-09-
 LIVE_TRADING=1 python -m coopa_trada reconcile --live --db ./live.db
 ```
 
-Live trading needs **both** `--live` and `LIVE_TRADING=1`, plus confirmed rules.
+Live trading needs **both** `--live` and `LIVE_TRADING=1`.
 The dashboard substitutes its typed confirmation phrase for the CLI flag. Live
 runs must use today's market date; `--once` and after-close starts are rejected.
 The app never enables the environment opt-in itself.
