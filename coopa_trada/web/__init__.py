@@ -29,10 +29,33 @@ def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None
     app.secret_key = secrets.token_hex(32)
     app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
 
+    import hmac
+    import os
+
+    password = os.environ.get("DASHBOARD_PASSWORD", "")
+
+    @app.before_request
+    def require_password():
+        # Optional HTTP Basic login for a dashboard reached over a network (a
+        # server). Any user name; the password is DASHBOARD_PASSWORD from .env.
+        if not password:
+            return None
+        auth = request.authorization
+        given = (auth.password or "") if auth is not None else ""
+        if hmac.compare_digest(given.encode(), password.encode()):
+            return None
+        return app.response_class("Coopa Trada: password required", 401,
+                                  {"WWW-Authenticate": 'Basic realm="Coopa Trada"'})
+
     @app.before_request
     def same_origin_writes():
         origin = request.headers.get("Origin")
-        if request.method == "POST" and origin and urlsplit(origin).netloc != request.host:
+        hosts = {request.host}
+        # Behind a proxy on this same machine (e.g. `tailscale serve`), the browser's
+        # host arrives as X-Forwarded-Host. Only trusted from a local proxy.
+        if request.remote_addr in ("127.0.0.1", "::1") and request.headers.get("X-Forwarded-Host"):
+            hosts.add(request.headers["X-Forwarded-Host"])
+        if request.method == "POST" and origin and urlsplit(origin).netloc not in hosts:
             return jsonify(error="Cross-origin writes are not allowed"), 403
 
     @app.errorhandler(413)

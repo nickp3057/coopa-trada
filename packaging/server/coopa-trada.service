@@ -1,0 +1,22 @@
+# systemd unit for running Coopa Trada on a Linux server (see docs/SERVER_SETUP.md).
+# install.sh fills in USER and DIR and copies this to /etc/systemd/system/.
+[Unit]
+Description=Coopa Trada (options bot dashboard, runner, Telegram intake)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@USER@
+WorkingDirectory=@DIR@
+# The app reads @DIR@/.env itself. It listens on 127.0.0.1 only; reach it
+# through Tailscale (tailscale serve), never by opening a port.
+ExecStart=@DIR@/.venv/bin/python -m coopa_trada.web --host 127.0.0.1 --port 8770
+Environment=PYTHONUNBUFFERED=1
+Restart=on-failure
+RestartSec=15
+# Give a running sell order loop time to unwind on stop.
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

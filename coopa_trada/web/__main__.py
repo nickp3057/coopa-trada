@@ -7,6 +7,7 @@ Environment:
     COOPA_TRADA_DB       path to the SQLite store (default: ./trada.db)
     COOPA_TRADA_SIGNALS  path to the signals CSV  (default: data/signals.example.csv)
     LIVE_TRADING=1        second, independent opt-in required for any live run
+    DASHBOARD_PASSWORD   required to listen on anything but 127.0.0.1 (HTTP Basic login)
 """
 
 from __future__ import annotations
@@ -25,6 +26,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8770)
     parser.add_argument("--debug", action="store_true", help="Flask debug reloader")
     args = parser.parse_args(argv)
+    local = args.host in ("127.0.0.1", "localhost", "::1")
+    if not local and len(os.environ.get("DASHBOARD_PASSWORD", "")) < 12:
+        parser.error("listening on a network address needs DASHBOARD_PASSWORD (12+ characters) in .env; "
+                     "see docs/SERVER_SETUP.md")
+    from ..logs import setup_logging
+    setup_logging()  # to stderr; under systemd that is the journal (journalctl -u coopa-trada)
 
     from ..watchdog import Watchdog
 

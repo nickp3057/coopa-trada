@@ -465,7 +465,7 @@ def api_telegram():
     if bot is None:
         return jsonify(configured=False, pending=[],
                        hint="Telegram is off. Add TELEGRAM_BOT_TOKEN and TELEGRAM_ALLOWED_CHAT_IDS to .env "
-                            "(see docs/TELEGRAM_SETUP.md), then quit and reopen the app.")
+                            "(see docs/TELEGRAM_SETUP.md), then restart the app (or the server's coopa-trada service).")
     return jsonify(configured=True, allowed_chats=len(bot.allowed), pending=bot.pending_previews(),
                    ignored_chats=sorted(bot.ignored_chats))
 

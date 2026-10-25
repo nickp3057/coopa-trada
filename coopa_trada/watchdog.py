@@ -31,6 +31,8 @@ log = get_logger("coopa_trada.watchdog", "APP")
 
 # Repeat a still-true login warning twice a day, not every 6 hours.
 TOKEN_ALERT_REPEAT = timedelta(hours=12)
+# Warn this many days before the bundled market calendar ends.
+CALENDAR_WARNING_DAYS = 60
 
 
 class Watchdog:
@@ -76,7 +78,7 @@ class Watchdog:
     def tick(self) -> None:
         now = self._now()
         checks = [self._check_auto_start, self._check_keep_awake, self._check_token,
-                  self._check_stale_locks, self._check_leftovers]
+                  self._check_stale_locks, self._check_leftovers, self._check_calendar]
         if self._first:
             checks.append(self._check_incidents)
         for check in checks:
@@ -87,6 +89,18 @@ class Watchdog:
         self._first = False
 
     # -- checks ----------------------------------------------------------------
+    def _check_calendar(self, now: datetime) -> None:
+        """The bundled market calendar ends on a fixed date; after it no run can start."""
+        from .calendar_svc import CalendarService
+        last = CalendarService().cal.last_session.date()
+        days = (last - now.date()).days
+        if days <= CALENDAR_WARNING_DAYS:
+            self.alerter.alert(
+                "calendar", "Market calendar running out",
+                f"The bundled market calendar ends {last:%b} {last.day}, {last.year} ({max(days, 0)} days). "
+                f"After that no run can start. Update the app (pip install -U exchange-calendars, "
+                f"or a new build) before then.", key="calendar", repeat_after=timedelta(days=1))
+
     def _check_auto_start(self, now: datetime) -> None:
         if self.auto_start is not None:
             self.auto_start.check(now)
