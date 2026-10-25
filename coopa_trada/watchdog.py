@@ -35,11 +35,13 @@ TOKEN_ALERT_REPEAT = timedelta(hours=12)
 
 class Watchdog:
     def __init__(self, paths, runner, alerter: Alerter, *, keep_awake=None, interval: float = 60.0,
-                 now: Callable[[], datetime] = lambda: datetime.now(timezone.utc)):
+                 now: Callable[[], datetime] = lambda: datetime.now(timezone.utc), auto_start=None):
         self.paths = paths
         self.runner = runner
         self.alerter = alerter
         self.keep_awake = keep_awake
+        # autostart.AutoStarter (or None): starts the day's run when it is due.
+        self.auto_start = auto_start
         self.interval = interval
         self._now = now
         self._first = True
@@ -73,8 +75,8 @@ class Watchdog:
 
     def tick(self) -> None:
         now = self._now()
-        checks = [self._check_keep_awake, self._check_token, self._check_stale_locks,
-                  self._check_leftovers]
+        checks = [self._check_auto_start, self._check_keep_awake, self._check_token,
+                  self._check_stale_locks, self._check_leftovers]
         if self._first:
             checks.append(self._check_incidents)
         for check in checks:
@@ -85,6 +87,10 @@ class Watchdog:
         self._first = False
 
     # -- checks ----------------------------------------------------------------
+    def _check_auto_start(self, now: datetime) -> None:
+        if self.auto_start is not None:
+            self.auto_start.check(now)
+
     def _check_keep_awake(self, now: datetime) -> None:
         if self.keep_awake is None:
             return

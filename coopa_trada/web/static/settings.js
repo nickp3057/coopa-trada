@@ -17,8 +17,9 @@ const PCT_OR_INT_FIELDS = [
   "cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct",
   "profit_trail_points",
 ];
-const TEXT_FIELDS = ["profit_trail_arm", "held_exit_start", "rank_delta_source", "exit_reference_price"];
-const BOOL_FIELDS = ["stops_on_entry_day"];
+const TEXT_FIELDS = ["profit_trail_arm", "held_exit_start", "rank_delta_source", "exit_reference_price",
+  "auto_start_time"];
+const BOOL_FIELDS = ["stops_on_entry_day", "auto_start_daily"];
 const DELTA_NUMBERS = ["min_abs_delta", "max_abs_delta"];
 
 let saved = null; // last response from the server

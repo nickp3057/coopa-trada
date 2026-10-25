@@ -32,8 +32,10 @@ def main(argv: list[str] | None = None) -> int:
     paths = app.config["COOPA_PATHS"]
     if not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         # Once per serving process (the debug reloader starts a second one).
+        from ..autostart import AutoStarter
         watchdog = Watchdog(paths, app.config["COOPA_RUNNER"], app.config["COOPA_ALERTER"],
-                            keep_awake=app.config["COOPA_KEEPAWAKE"]).start()
+                            keep_awake=app.config["COOPA_KEEPAWAKE"],
+                            auto_start=AutoStarter(paths, app.config["COOPA_RUNNER"])).start()
         app.config["COOPA_RUNNER"].on_change = watchdog.poke
         app.config["COOPA_WATCHDOG"] = watchdog
         from . import start_telegram

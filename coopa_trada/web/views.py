@@ -445,9 +445,10 @@ def confirm_picks(csv_text: str, trade_date: str) -> dict:
         path = save_confirmed_list(_paths().db_path, csv_text, trade_date)
         _paths().signals_path = str(path)
         running = runner.status == "running"
+        mode = "practice" if runner.mode == "DRY-RUN" else "LIVE"
     if running:
-        message = ("Picks confirmed. The run in progress buys them now if it is inside the buying "
-                   "window (and if the run is for this trade date).")
+        message = (f"Picks confirmed. The {mode} run in progress buys them now if it is inside the "
+                   "buying window (and if the run is for this trade date).")
     else:
         message = "Picks confirmed. No run is active: start today's run to buy them."
     return {"signals_path": str(path), "date": trade_date, "message": message, "run_active": running}

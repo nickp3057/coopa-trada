@@ -159,8 +159,10 @@ def main(argv: list[str] | None = None) -> int:
 
     app = create_app()
     server = make_server("127.0.0.1", port, app, threaded=True)
+    from .autostart import AutoStarter
     watchdog = Watchdog(app.config["COOPA_PATHS"], app.config["COOPA_RUNNER"],
-                        app.config["COOPA_ALERTER"], keep_awake=app.config["COOPA_KEEPAWAKE"]).start()
+                        app.config["COOPA_ALERTER"], keep_awake=app.config["COOPA_KEEPAWAKE"],
+                        auto_start=AutoStarter(app.config["COOPA_PATHS"], app.config["COOPA_RUNNER"])).start()
     app.config["COOPA_RUNNER"].on_change = watchdog.poke
     app.config["COOPA_WATCHDOG"] = watchdog
     from .web import start_telegram

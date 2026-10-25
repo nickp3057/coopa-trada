@@ -12,6 +12,14 @@
 earliest_buy_minutes_before_close: 30
 no_new_buys_minutes_before_close: 3
 
+# Start the day's run automatically at this Mountain time on trading days, so
+# nobody has to press Start (07:00 MT = 30 minutes before the open). The
+# automatic run is a practice run unless the server's .env has both
+# LIVE_TRADING=1 and AUTO_START_LIVE=1. A run started or stopped by hand that day
+# is left alone. Quote the time.
+auto_start_daily: true
+auto_start_time: "07:00"
+
 # Exit-management window, per asset class. Each endpoint is either:
 #   - "HH:MM"  -> a wall-clock time in America/New_York on the session date
 #                 (on half days it moves earlier by as much as the close does), or

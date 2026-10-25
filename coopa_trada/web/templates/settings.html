@@ -16,6 +16,14 @@
 
     <fieldset>
       <legend>Buying window (buys happen when picks are confirmed)</legend>
+      <label class="inline"><input type="checkbox" name="auto_start_daily">
+        Start the day&rsquo;s run automatically on trading days</label>
+      <label class="block">Automatic start time, Mountain (<code>HH:MM</code>; 07:00 is 30 minutes before the open)
+        <input name="auto_start_time" type="text">
+      </label>
+      <p class="hint">The automatic run is a practice run unless the server&rsquo;s .env has both
+        <code>LIVE_TRADING=1</code> and <code>AUTO_START_LIVE=1</code>. A run you started or stopped
+        yourself that day is left alone.</p>
       <p class="hint">The bot buys as soon as a pick list is confirmed (Telegram or this
         dashboard), but only inside this window, counted back from the real close, so half
         days move it earlier. On a normal day the close is 2:00 PM Mountain.</p>

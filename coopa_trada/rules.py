@@ -116,6 +116,10 @@ class Rules:
     # the rules start from $0.90). "fill": the price actually paid (the ask).
     # Profit and loss in the trade log always use the real fill prices.
     exit_reference_price: str = "mid_at_entry"
+    # Start the day's run automatically at this Mountain time on trading days
+    # (see autostart.py). 07:00 MT is 30 minutes before the open.
+    auto_start_daily: bool = True
+    auto_start_time: time = time(7, 0)
     earliest_buy_minutes_before_close: int = 30
     no_new_buys_minutes_before_close: int = 3
     exit_reprice_after_seconds: int = 60
@@ -285,7 +289,19 @@ def load_rules(path: str | Path) -> Rules:
     if reference not in EXIT_REFERENCE_PRICES:
         raise ValueError(f"exit_reference_price must be one of: {', '.join(EXIT_REFERENCE_PRICES)}")
 
+    auto_daily = data.get("auto_start_daily", True)
+    if type(auto_daily) is not bool:
+        raise ValueError("auto_start_daily must be true or false")
+    try:
+        auto_time = _coerce_endpoint(data.get("auto_start_time", "07:00"))
+        if not isinstance(auto_time, time):
+            raise ValueError
+    except (ValueError, TypeError):
+        raise ValueError('auto_start_time must be a Mountain-time HH:MM, for example "07:00"') from None
+
     return Rules(
+        auto_start_daily=auto_daily,
+        auto_start_time=auto_time,
         exit_reference_price=reference,
         exit_reprice_after_seconds=reprice_after,
         exit_reprice_max_attempts=reprice_max,
