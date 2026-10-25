@@ -87,6 +87,10 @@ check and send him the setup key it prints, privately (he chooses "enter a setup
 
 ## 6. Fill in each person's settings
 
+The Schwab lines can be filled in from the website instead: log in → **Settings →
+Your Schwab app** (saved to that person's own file only). Everything else, and
+`LIVE_TRADING`, is set in the file on the server:
+
 ```bash
 nano ~/coopa-data/cooper/.env
 ```

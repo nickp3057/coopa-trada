@@ -68,14 +68,19 @@
 
 <section class="card danger" id="live-panel">
   <h2>Enable live trading</h2>
-  <p id="live-env" class="status-line">checking environment&hellip;</p>
-  <div id="live-settings" class="status-line">checking settings&hellip;</div>
+  <p class="hint">A live run places <strong>real orders</strong> in your Schwab account. It can
+    start only when every line below is ticked.</p>
+  <ul id="live-checks" class="checklist"><li class="hint">checking&hellip;</li></ul>
+  <p id="live-env" class="status-line" hidden></p>
+  <details>
+    <summary>What a live run trades with</summary>
+    <div id="live-settings" class="status-line">checking settings&hellip;</div>
+  </details>
   <details>
     <summary>Show the live&#8209;run control</summary>
-    <p class="hint">Live trading needs <em>two independent</em> opt&#8209;ins. This UI
-      only provides the first (typing the phrase below). The second is
-      <code>LIVE_TRADING=1</code> in the server&rsquo;s environment, which this UI
-      never sets.</p>
+    <p class="hint">Real trading needs two separate switches: <code>LIVE_TRADING=1</code> in this
+      bot&rsquo;s settings file on the server (this page never sets it), and typing the phrase
+      below. The run is always for today.</p>
     <label class="block">Type the confirmation phrase
       <input id="live-confirm" type="text" autocomplete="off" placeholder="&hellip;">
     </label>

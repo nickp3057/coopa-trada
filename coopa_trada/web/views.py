@@ -110,7 +110,68 @@ def api_run_status():
     snap["live_confirm_phrase"] = LIVE_CONFIRM_PHRASE
     snap["keep_awake"] = current_app.config["COOPA_KEEPAWAKE"].status()
     snap.update(settings_summary(_paths().config_path))
+    snap["live_checks"] = _live_checks(snap)
     return jsonify(snap)
+
+
+def _live_checks(snap: dict) -> list[dict]:
+    """What a live run needs, each with whether it is met and how to fix it."""
+    from ..calendar_svc import CalendarService
+    from ..clock import fmt_display, now_utc, to_market
+    from .env_io import env_path, schwab_keys_status
+
+    restart = ("restart this bot (server: sudo systemctl restart coopa-trada@YOURNAME; "
+               "Mac: quit and reopen the app)")
+    checks = [{"ok": bool(snap.get("live_env_enabled")),
+               "label": "Real trading is switched on for this bot (LIVE_TRADING=1)",
+               "fix": f"On the server, edit {env_path()} so it says LIVE_TRADING=1, then {restart}."}]
+    keys = schwab_keys_status()
+    checks.append({"ok": keys["api_key_set"] and keys["secret_set"],
+                   "label": "Your Schwab app key and secret are saved",
+                   "fix": "Settings → Schwab app: paste the App Key and Secret from the Schwab Developer Portal."})
+    token = token_status(config_path=_paths().config_path)
+    connected = token["state"] in ("connected", "expiring_soon")
+    checks.append({"ok": connected and bool(token.get("covers_next_run")),
+                   "label": "Schwab is connected, and the login lasts until the bot has sold",
+                   "fix": (token.get("hold_message") or token.get("message") or "")
+                   + " Use Reconnect Schwab on the Dashboard."})
+    now = now_utc()
+    try:
+        cal = CalendarService()
+        today = to_market(now).date()
+        open_today = cal.is_trading_day(today) and now < cal.session_close(today)
+        nxt = today if open_today else cal.next_session(today)
+        when = fmt_display(cal.session_open(nxt))
+    except Exception as exc:  # noqa: BLE001 - e.g. past the bundled calendar
+        open_today, when = False, f"unknown ({exc})"
+    checks.append({"ok": open_today,
+                   "label": "The market is open today (a live run starts on a trading day, before the close)",
+                   "fix": f"Weekends, holidays and after the 2:00 PM MT close are closed. Next session opens {when}."})
+    checks.append({"ok": snap.get("settings_error") is None, "label": "The settings file is valid",
+                   "fix": snap.get("settings_error") or ""})
+    checks.append({"ok": snap.get("status") != "running", "label": "No run is going right now",
+                   "fix": "Press Stop on the practice run first (it stops watching; it sells nothing)."})
+    return checks
+
+
+# -- Schwab app details (this bot's own .env) -------------------------------
+@bp.get("/api/schwab/keys")
+def api_schwab_keys():
+    from .env_io import schwab_keys_status
+    return jsonify(schwab_keys_status())
+
+
+@bp.post("/api/schwab/keys")
+def api_schwab_keys_save():
+    from .env_io import EnvValidationError, save_schwab_keys
+    if _runner().status == "running":
+        return jsonify(error="Stop the current run before changing the Schwab app details."), 409
+    try:
+        status = save_schwab_keys(request.get_json(silent=True) or {})
+    except EnvValidationError as exc:
+        return jsonify(error=str(exc)), 400
+    return jsonify(**status, message="Saved. If you changed the App Key or Secret, click Reconnect Schwab "
+                                   "on the Dashboard so the login uses them.")
 
 
 @bp.post("/api/run/start")

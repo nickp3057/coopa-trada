@@ -29,8 +29,7 @@ let confirmPhrase = "ENABLE LIVE TRADING";
 let lastStatus = null;
 
 function liveAllowed(s) {
-  return s.status !== "running" && !!s.live_env_enabled && !s.settings_error &&
-    liveConfirm.value === confirmPhrase;
+  return (s.live_checks || []).every((c) => c.ok) && liveConfirm.value === confirmPhrase;
 }
 
 function renderLiveSettings(s) {
@@ -51,7 +50,20 @@ function renderLiveSettings(s) {
   liveSettings.append(list);
 }
 
+function renderLiveChecks(s) {
+  const list = document.getElementById("live-checks");
+  if (!list || !s.live_checks) return;
+  list.replaceChildren(...s.live_checks.map((c) => {
+    const li = CT.el("li", { class: c.ok ? "check-ok" : "check-no" });
+    li.append(CT.el("span", { class: "check-mark", text: c.ok ? "✓" : "✗", "aria-hidden": "true" }),
+      CT.el("span", { class: "check-label", text: c.label }));
+    if (!c.ok && c.fix) li.append(CT.el("span", { class: "check-fix", text: c.fix }));
+    return li;
+  }));
+}
+
 function renderStatus(s) {
+  renderLiveChecks(s);
   const running = s.status === "running";
   btnStart.disabled = running;
   btnStop.disabled = !running;
@@ -235,7 +247,7 @@ if (btnStartLive) {
     const { ok, body } = await CT.post("/api/run/start", {
       live: true,
       confirm: liveConfirm.value,
-      date: runDate.value || null,
+      date: null,  // a live run is always for today, whatever the practice date box says
     });
     if (!ok) liveError.textContent = body.error || "could not start live run";
     else liveConfirm.value = "";

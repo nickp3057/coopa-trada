@@ -59,7 +59,7 @@ def sent_alerts(monkeypatch):
     monkeypatch.delenv("NTFY_TOPIC", raising=False)
     # No test reaches the Claude API or Telegram; tests that need them set fakes.
     for name in ("ANTHROPIC_API_KEY", "COOPA_IMAGE_READER", "TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_CHAT_IDS",
-                 "AUTO_START_LIVE", "DASHBOARD_PASSWORD"):
+                 "AUTO_START_LIVE", "DASHBOARD_PASSWORD", "COOPA_TRADA_ENV_FILE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.delenv("NTFY_SERVER", raising=False)
     return outbox

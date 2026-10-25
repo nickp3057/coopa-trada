@@ -1,15 +1,17 @@
 "use strict";
-// Settings: load rules into the form, save with inline validation messages.
-// Every value is validated server-side by the same code that loads rules.yaml.
+// Settings: load the rules into the form, save them, and keep the Schwab app
+// details (a separate form). Every value is validated server-side by the same
+// code that loads rules.yaml. Percentages are shown as %, stored as fractions.
 
 const form = document.getElementById("rules-form");
 const msg = document.getElementById("rules-msg");
+const dirty = document.getElementById("dirty");
 const pathEl = document.getElementById("rules-path");
 const fileWarn = document.getElementById("rules-file-warning");
 const noteEl = document.getElementById("ambiguous-note");
 const ewRows = document.getElementById("exit-window-rows");
 
-const PCT_OR_INT_FIELDS = [
+const NUMBER_FIELDS = [
   "earliest_buy_minutes_before_close", "no_new_buys_minutes_before_close", "poll_interval_seconds",
   "trailing_stop_pct", "hard_stop_loss_pct", "take_profit_pct",
   "total_budget", "max_dollars_per_position",
@@ -21,43 +23,70 @@ const TEXT_FIELDS = ["profit_trail_arm", "held_exit_start", "rank_delta_source",
   "auto_start_time"];
 const BOOL_FIELDS = ["stops_on_entry_day", "auto_start_daily", "next_day_time_exit"];
 const DELTA_NUMBERS = ["min_abs_delta", "max_abs_delta"];
+const EW_LABELS = { SINGLE_NAME: "Stocks", ETF: "ETFs" };
 
 let saved = null; // last response from the server
 
-function fillDelta(delta) {
-  form.elements.delta_enabled.checked = !!delta.enabled;
-  form.elements.delta_source.value = delta.source;
-  for (const name of DELTA_NUMBERS) form.elements["delta_" + name].value = delta[name];
+const isPct = (input) => input && input.hasAttribute("data-pct");
+const round = (n) => Number(Number(n).toFixed(6));
+
+// "15:35" New York -> "1:35 PM MT"; 25 (minutes before a 4:00 PM ET close) -> "3:35 PM ET" -> MT.
+function mtFromEt(value) {
+  const s = String(value).trim();
+  let minutes;
+  if (/^\d+$/.test(s)) minutes = 16 * 60 - Number(s);
+  else {
+    const m = s.match(/^(\d{1,2}):(\d{2})$/);
+    if (!m) return "";
+    minutes = Number(m[1]) * 60 + Number(m[2]);
+  }
+  minutes -= 120; // New York is two hours ahead of Mountain
+  if (minutes < 0 || minutes >= 24 * 60) return "";
+  const h = Math.floor(minutes / 60), mm = String(minutes % 60).padStart(2, "0");
+  return `${((h + 11) % 12) + 1}:${mm} ${h < 12 ? "AM" : "PM"} MT`;
+}
+
+function updateHints() {
+  document.querySelectorAll("[data-mt-for]").forEach((el) => {
+    const input = form.elements[el.dataset.mtFor];
+    const t = input && input.value !== "" ? mtFromEt(input.value) : "";
+    el.textContent = t ? `= ${t} on a normal day` : "";
+  });
+  const deltaOn = form.elements.delta_enabled.checked;
+  document.getElementById("delta-fields").classList.toggle("muted-block", !deltaOn);
+  ewRows.querySelectorAll(".ew-row").forEach((row) => {
+    const [s, e] = row.querySelectorAll("input");
+    row.querySelector(".ew-mt").textContent = [mtFromEt(s.value), mtFromEt(e.value)].every(Boolean)
+      ? `${mtFromEt(s.value)} – ${mtFromEt(e.value)}` : "";
+  });
 }
 
 function renderExitWindow(ew) {
-  ewRows.innerHTML = "";
+  ewRows.replaceChildren();
   for (const cls of Object.keys(ew)) {
     const [start, end] = ew[cls];
     const row = CT.el("div", { class: "ew-row" });
-    row.append(CT.el("span", { class: "ew-label", text: cls }));
-    const s = CT.el("input", { type: "text", value: String(start), "data-ew": cls, "data-end": "0" });
-    const e = CT.el("input", { type: "text", value: String(end), "data-ew": cls, "data-end": "1" });
-    row.append("start ", s, " end ", e);
+    row.append(CT.el("span", { class: "ew-label", text: EW_LABELS[cls] || cls }));
+    const s = CT.el("input", { type: "text", value: String(start), "data-ew": cls, "data-end": "0", "aria-label": cls + " start" });
+    const e = CT.el("input", { type: "text", value: String(end), "data-ew": cls, "data-end": "1", "aria-label": cls + " end" });
+    row.append(s, CT.el("span", { class: "hint", text: "to" }), e, CT.el("span", { class: "help ew-mt" }));
     ewRows.append(row);
   }
 }
 
 function fill(data) {
-  pathEl.textContent = "File: " + data.path;
   saved = data;
+  pathEl.textContent = "Settings file: " + data.path;
   noteEl.textContent = data.default_stop_note || "";
-  if (data.warning) {
-    fileWarn.hidden = false;
-    fileWarn.textContent = "Current file fails validation: " + data.warning;
-  } else {
-    fileWarn.hidden = true;
-  }
-  for (const name of PCT_OR_INT_FIELDS) {
+  const trailNote = document.getElementById("profit-trail-note");
+  if (trailNote) trailNote.textContent = data.profit_trail_note || "";
+  fileWarn.hidden = !data.warning;
+  fileWarn.textContent = data.warning ? "The saved settings file has a problem: " + data.warning : "";
+  for (const name of NUMBER_FIELDS) {
     const input = form.elements[name];
     if (!input) continue;
     const v = data[name];
-    input.value = v === null || v === undefined ? "" : v;
+    input.value = v === null || v === undefined ? "" : (isPct(input) ? round(v * 100) : v);
   }
   for (const name of TEXT_FIELDS) {
     if (form.elements[name] && data[name] != null) form.elements[name].value = data[name];
@@ -65,20 +94,21 @@ function fill(data) {
   for (const name of BOOL_FIELDS) {
     if (form.elements[name]) form.elements[name].checked = !!data[name];
   }
-  const holdNote = document.getElementById("hold-note");
-  if (holdNote) holdNote.textContent = data.hold_note || "";
-  const trailNote = document.getElementById("profit-trail-note");
-  if (trailNote) trailNote.textContent = data.profit_trail_note || "";
+  const delta = data.delta_filter || {};
+  form.elements.delta_enabled.checked = !!delta.enabled;
+  form.elements.delta_source.value = delta.source || "schwab";
+  for (const name of DELTA_NUMBERS) form.elements["delta_" + name].value = delta[name] ?? "";
   renderExitWindow(data.exit_window || {});
-  fillDelta(data.delta_filter || {});
+  updateHints();
+  dirty.hidden = true;
 }
 
 function collect() {
   const payload = {};
-  for (const name of PCT_OR_INT_FIELDS) {
+  for (const name of NUMBER_FIELDS) {
     const input = form.elements[name];
     if (!input) continue;
-    payload[name] = input.value === "" ? null : Number(input.value);
+    payload[name] = input.value === "" ? null : (isPct(input) ? round(Number(input.value) / 100) : Number(input.value));
   }
   for (const name of TEXT_FIELDS) {
     if (form.elements[name]) payload[name] = form.elements[name].value;
@@ -105,29 +135,69 @@ async function load() {
   msg.textContent = "";
   const { ok, body } = await CT.get("/api/rules");
   if (ok) fill(body);
-  else msg.textContent = "could not load rules";
+  else { msg.textContent = "Could not load the settings."; msg.className = "msg is-error"; }
 }
 
+form.addEventListener("input", () => { dirty.hidden = false; msg.textContent = ""; updateHints(); });
 form.addEventListener("submit", async (ev) => {
   ev.preventDefault();
-  msg.textContent = "saving…";
+  msg.textContent = "Saving…";
   msg.className = "msg";
-  const payload = collect();
-  const { ok, body } = await CT.post("/api/rules", payload);
+  const { ok, body } = await CT.post("/api/rules", collect());
   if (ok) {
     fill(body);
-    msg.textContent = "Saved and reloaded.";
+    msg.textContent = "Saved.";
     msg.className = "msg ok";
   } else {
-    msg.textContent = body.error || "save rejected";
+    msg.textContent = body.error || "Not saved.";
     msg.className = "msg is-error";
   }
 });
-
 document.getElementById("btn-reload").addEventListener("click", load);
+window.addEventListener("beforeunload", (ev) => { if (!dirty.hidden) ev.preventDefault(); });
 load();
 
-// -- alerts ---------------------------------------------------------------
+// -- Schwab app details ---------------------------------------------------------
+const keysForm = document.getElementById("keys-form");
+const keysMsg = document.getElementById("keys-msg");
+
+function renderKeys(k) {
+  const state = document.getElementById("keys-state");
+  const ready = k.api_key_set && k.secret_set;
+  state.textContent = ready ? "Saved" : "Not set up";
+  state.className = "pill " + (ready ? "pill-ok" : "pill-warn");
+  keysForm.elements.api_key.value = "";
+  keysForm.elements.app_secret.value = "";
+  keysForm.elements.api_key.placeholder = k.api_key_set ? "saved " + k.api_key_hint + " (leave empty to keep)" : "paste your App Key";
+  keysForm.elements.app_secret.placeholder = k.secret_set ? "saved (leave empty to keep)" : "paste your Secret";
+  keysForm.elements.callback_url.value = k.callback_url || "";
+  keysForm.elements.account_id.value = "";
+  keysForm.elements.account_id.placeholder = k.account_id_set ? "saved " + k.account_hint : "e.g. 12345678";
+}
+
+async function loadKeys() {
+  const { ok, body } = await CT.get("/api/schwab/keys");
+  if (ok) renderKeys(body);
+}
+
+keysForm.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  keysMsg.textContent = "Saving…";
+  keysMsg.className = "msg";
+  const data = Object.fromEntries(new FormData(keysForm).entries());
+  const { ok, body } = await CT.post("/api/schwab/keys", data);
+  if (ok) {
+    renderKeys(body);
+    keysMsg.textContent = body.message;
+    keysMsg.className = "msg ok";
+  } else {
+    keysMsg.textContent = body.error || "Not saved.";
+    keysMsg.className = "msg is-error";
+  }
+});
+loadKeys();
+
+// -- alerts -----------------------------------------------------------------------
 function renderAlerts(body) {
   const channels = document.getElementById("alert-channels");
   channels.replaceChildren(...(body.channels || []).map((c) =>

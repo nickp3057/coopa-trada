@@ -142,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
     from .logs import setup_logging
 
     # Only the .env next to the app; never one found by searching elsewhere.
+    # (Settings → Schwab app writes to this same file.)
+    os.environ["COOPA_TRADA_ENV_FILE"] = str(home / ".env")
     load_env(home / ".env")
     setup_logging()
 
