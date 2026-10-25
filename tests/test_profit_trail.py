@@ -83,7 +83,6 @@ def test_invalid_settings_are_rejected(tmp_path):
 def test_rules_default_to_ten_points_from_entry_and_blank_turns_it_off(tmp_path):
     rules = load_rules("config/rules.example.yaml")
     assert (rules.profit_trail_points, rules.profit_trail_arm) == (10, "from_entry")
-    assert rules.setting_confirmations["profit_point_trail"]["confirmed_by_cooper"] is False
     p = tmp_path / "r.yaml"
     p.write_text(open("config/rules.example.yaml").read().replace("profit_trail_points: 10", "profit_trail_points:"))
     assert load_rules(p).profit_trail_points is None
@@ -133,7 +132,7 @@ def test_engine_without_the_rule_holds_through_a_ten_point_retrace(store):
     assert [eng._exit_tick(DAY) for _ in range(2)] == [0, 0]
 
 
-def test_settings_page_saves_the_rule_and_a_change_resets_its_confirmation(tmp_path):
+def test_settings_page_saves_the_rule(tmp_path):
     from coopa_trada.web import create_app
     from coopa_trada.web.config import WebPaths
     cfg = tmp_path / "rules.yaml"
@@ -141,11 +140,7 @@ def test_settings_page_saves_the_rule_and_a_change_resets_its_confirmation(tmp_p
     client = create_app(WebPaths(config_path=str(cfg), db_path=str(tmp_path / "t.db"))).test_client()
     good = client.get("/api/rules").get_json()
     assert (good["profit_trail_points"], good["profit_trail_arm"]) == (10, "from_entry")
-    marks = {**good["setting_confirmations"], "profit_point_trail": {"confirmed_by_cooper": True}}
-    assert client.post("/api/rules", json={**good, "setting_confirmations": marks}).status_code == 200
-    assert load_rules(cfg).setting_confirmations["profit_point_trail"]["confirmed_by_cooper"] is True
-    good = client.get("/api/rules").get_json()
     body = client.post("/api/rules", json={**good, "profit_trail_arm": "in_profit"}).get_json()
     assert body["profit_trail_arm"] == "in_profit"
-    assert body["setting_confirmations"]["profit_point_trail"]["confirmed_by_cooper"] is False
+    assert load_rules(cfg).profit_trail_arm == "in_profit"
     assert client.post("/api/rules", json={**good, "profit_trail_arm": "never"}).status_code == 400

@@ -17,7 +17,7 @@ from coopa_trada.contracts import SyntheticResolver
 from coopa_trada.engine import Engine
 from coopa_trada.exits import Quote
 from coopa_trada.models import AssetClass, Right, Signal
-from coopa_trada.rules import SETTING_LABELS, load_rules
+from coopa_trada.rules import load_rules
 from coopa_trada.schwab_login import LoginError, LoginRejected, begin_login, finish_login
 from coopa_trada.schwab_token import TokenState, read_token_status, start_block_reason
 from coopa_trada.store import Store
@@ -110,8 +110,7 @@ class SchwabBackedResolver(SyntheticResolver):
 
 
 def _engine(store, *, mode=Mode.DRY_RUN, resolver=None, token_status=None):
-    rules = replace(load_rules("config/rules.example.yaml"),
-                    setting_confirmations={k: {"confirmed_by_cooper": True} for k in SETTING_LABELS})
+    rules = load_rules("config/rules.example.yaml")
     broker = DryRunBroker(store)
     broker.mode = mode
     return Engine(source=SimpleNamespace(fetch=lambda day: [_signal()]),
@@ -323,8 +322,6 @@ def test_reconnect_refused_while_a_run_is_in_progress(client):
 
 def test_live_start_blocked_when_schwab_not_set_up(client, tmp_path, monkeypatch):
     monkeypatch.setenv("LIVE_TRADING", "1")
-    cfg = tmp_path / "rules.yaml"
-    cfg.write_text(cfg.read_text().replace("confirmed_by_cooper: false", "confirmed_by_cooper: true"))
     rv = client.post("/api/run/start", json={"live": True, "confirm": "ENABLE LIVE TRADING"})
     assert rv.status_code == 409
     assert "Schwab is not set up" in rv.get_json()["error"]

@@ -12,7 +12,7 @@ from coopa_trada.contracts import SyntheticResolver
 from coopa_trada.engine import Engine
 from coopa_trada.exits import Quote
 from coopa_trada.models import AssetClass, Right, Signal
-from coopa_trada.rules import SETTING_LABELS, FixedQuantitySizer, load_rules
+from coopa_trada.rules import FixedQuantitySizer, load_rules
 from coopa_trada.schwab_token import TokenState, TokenStatus
 from coopa_trada.store import Store
 from coopa_trada.calendar_svc import CalendarService
@@ -70,10 +70,6 @@ class Client:
         return response([])
 
 
-def confirmations(*unconfirmed):
-    return {key: {"confirmed_by_cooper": key not in unconfirmed} for key in SETTING_LABELS}
-
-
 def logged_in(now):
     """A fake Schwab login made at NOW, valid for 7 days."""
     return TokenStatus(TokenState.CONNECTED, "fake", "Logged in to Schwab.",
@@ -81,8 +77,7 @@ def logged_in(now):
 
 
 def engine(store, broker, now=lambda: NOW, sleep=lambda _: None):
-    rules = replace(load_rules("config/rules.example.yaml"), setting_confirmations=confirmations(),
-                    cooper_drop_from_entry_pct=None)
+    rules = replace(load_rules("config/rules.example.yaml"), cooper_drop_from_entry_pct=None)
     return Engine(source=SimpleNamespace(fetch=lambda day: [signal()]),
                   resolver=SyntheticResolver(base_price=1), broker=broker, store=store,
                   rules=rules, cal=CalendarService(), mode=broker.mode,
@@ -201,35 +196,29 @@ def test_cap_uses_ask_and_pending_entries_reserve_budget(store):
     assert store.conn.execute("SELECT category FROM skip_events").fetchone()[0] == "budget"
 
 
-@pytest.mark.parametrize("key", list(SETTING_LABELS))
-def test_each_unconfirmed_setting_blocks_live_before_any_broker_call(store, key):
-    client = Client()
-    eng = engine(store, SchwabBroker(client, "account", store, None))
-    eng.rules = replace(eng.rules, setting_confirmations=confirmations(key))
-    with pytest.raises(ValueError, match=f"unconfirmed settings: {SETTING_LABELS[key]}\\."):
-        eng.run(DAY)
-    assert not client.submitted
-    assert not store.conn.execute("SELECT COUNT(*) FROM orders").fetchone()[0]
+def test_old_confirmation_markers_in_a_rules_file_are_ignored(tmp_path):
+    # Settings no longer wait for anyone's sign-off; older files still load.
+    p = tmp_path / "old.yaml"
+    p.write_text(open("config/rules.example.yaml").read()
+                 + "\nsetting_confirmations:\n  spending_cap:\n    confirmed_by_cooper: false\n")
+    assert load_rules(p).total_budget == 300
 
 
-def test_unconfirmed_settings_never_block_dry_run(store):
+def test_dry_run_once_places_the_entry(store):
     eng = engine(store, DryRunBroker(store))
-    eng.rules = replace(eng.rules, setting_confirmations=confirmations(*SETTING_LABELS))
     eng.run(DAY, once=True)
     assert store.conn.execute(
         "SELECT COUNT(*) FROM orders WHERE mode = 'DRY-RUN' AND intent = 'ENTRY'").fetchone()[0] == 1
 
 
-def test_live_rules_and_historical_dates_are_blocked(store):
-    eng = engine(store, SchwabBroker(Client(), "account", store, None))
-    eng.rules = replace(eng.rules, setting_confirmations=confirmations(*SETTING_LABELS))
-    with pytest.raises(ValueError, match="unconfirmed"):
-        eng.run(DAY)
-    eng.rules = replace(eng.rules, setting_confirmations=confirmations())
+def test_live_historical_dates_and_once_are_blocked(store):
+    client = Client()
+    eng = engine(store, SchwabBroker(client, "account", store, None))
     with pytest.raises(ValueError, match="today"):
         eng.run(date(2026, 9, 1))
     with pytest.raises(ValueError, match="continuous monitoring"):
         eng.run(DAY, once=True)
+    assert not client.submitted
 
 
 def test_account_binding_prevents_switching_account(store):

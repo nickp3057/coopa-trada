@@ -179,5 +179,3 @@ def test_quoted_time_and_minutes_are_accepted(tmp_path):
 def test_hold_settings_default_to_stops_on_and_monitoring_from_the_open():
     rules = load_rules("config/rules.example.yaml")
     assert (rules.stops_on_entry_day, rules.held_exit_start) == (True, "open")
-    for key in ("entry_day_stops", "next_day_exits"):
-        assert rules.setting_confirmations[key]["confirmed_by_cooper"] is False

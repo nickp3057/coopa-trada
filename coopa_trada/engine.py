@@ -276,11 +276,6 @@ class Engine:
 
     def _run_locked(self, day: date, *, once: bool) -> None:
         if self.mode is Mode.LIVE:
-            # Enforced here, not only in the UI, so neither the CLI nor the web
-            # runner can start live trading on unconfirmed settings.
-            blocked = self.rules.live_block_reason()
-            if blocked is not None:
-                raise ValueError(blocked)
             if once:
                 raise ValueError("Live --once is disabled: orders require continuous monitoring")
             if day != clock.to_market(self._now()).date():

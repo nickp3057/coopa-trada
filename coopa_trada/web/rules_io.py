@@ -1,8 +1,8 @@
-"""Settings serialization.
+"""Settings serialization: read, validate and write ``config/rules.yaml``.
 
-Trading values and Cooper-confirmation markers are both editable. Changing a
-confirmed setting's value resets its marker unless the same save re-confirms it,
-so a confirmation always refers to the value it was given for.
+Every trading choice is an ordinary setting with a working default; nothing
+waits for anyone's sign-off. ``settings_summary`` describes the current values
+in plain words for the dashboard.
 """
 from __future__ import annotations
 
@@ -14,8 +14,7 @@ from pathlib import Path
 
 import yaml
 
-from ..rules import (SETTING_LABELS, DeltaFilter, default_settings_metadata, load_rules,
-                     setting_confirmations, unconfirmed_settings)
+from ..rules import DeltaFilter, load_rules
 
 STOP_KEYS = ("cooper_drop_from_peak_pct", "cooper_drop_from_entry_pct")
 DEFAULT_STOP_NOTE = (
@@ -25,7 +24,7 @@ DEFAULT_STOP_NOTE = (
     "it is the earlier, tighter exit when the peak exceeds entry. Both fields are editable; "
     "blank disables a field. If both are set, both are active and the first trigger wins. "
     "The standard 25% / 40% / 60% exits remain active alongside it: adding triggers can "
-    "make an exit earlier, never later. Confirm these defaults with Cooper before a live run."
+    "make an exit earlier, never later."
 )
 PROFIT_TRAIL_NOTE = (
     "Cooper's rule: sell when the profit % drops this many percentage points below its peak "
@@ -48,19 +47,6 @@ OPTIONAL_DEFAULTS = {
     "earliest_buy_minutes_before_close": 30,
     "no_new_buys_minutes_before_close": 3,
 }
-# Which rule keys each confirmation marker covers.
-CONFIRMATION_KEYS = {
-    "spending_cap": ("max_dollars_per_position",),
-    "ten_percent_stop": STOP_KEYS,
-    "delta_filter": ("delta_filter",),
-    "profit_point_trail": ("profit_trail_points", "profit_trail_arm"),
-    "entry_day_stops": ("stops_on_entry_day",),
-    "next_day_exits": ("held_exit_start",),
-    "total_budget": ("total_budget",),
-    "delta_ranking": ("rank_delta_source",),
-    "exit_repricing": ("exit_reprice_after_seconds", "exit_reprice_max_attempts"),
-    "buy_window": ("earliest_buy_minutes_before_close", "no_new_buys_minutes_before_close"),
-}
 HOLD_NOTE = (
     "Cooper's hold rule: if the take-profit is reached on the day of entry, sell that day; "
     "otherwise hold and roll to the next trading day, where every exit applies and anything "
@@ -69,21 +55,18 @@ HOLD_NOTE = (
     "protect a position on the day it was bought. 'Next-day exits start' is when held "
     "positions start being watched: open, a New York HH:MM time, or minutes before the close."
 )
-BUDGET_COMMENT = """# Cooper: $300 is the TOTAL budget (raise it later if trading is profitable):
-# the most all open positions together may cost, including ones held from
-# earlier days and buy orders still working, checked at ask x 100. There is no
-# limit on the number of positions. Picks are ranked by |delta| (highest
-# first; rank_delta_source: schwab_live = Schwab's live chain, tvt = the list's
+BUDGET_COMMENT = """# Total budget ($300 to start; raise it later if trading is profitable): the
+# most all open positions together may cost, including ones held from earlier
+# days and buy orders still working, checked at ask x 100. There is no limit on
+# the number of positions. Picks are ranked by |delta| (highest first;
+# rank_delta_source: schwab_live = Schwab's live chain, tvt = the list's
 # TVT-DELTA column) and bought in that order while each still fits.
-# NEW SETTINGS, NOT CONFIRMED BY COOPER.
 """
 SPENDING_COMMENT = """# Spending cap per pick. Always buys exactly 1 contract; if that contract
 # costs more than this, the ticker is skipped entirely.
-# Cooper answered $300 per pick (2026-10); tick it as confirmed in Settings.
 """
-DELTA_COMMENT = """# Delta filtering. Off by default -- we assume Cooper's source already screens
-# on delta and sends only the picks it wants traded.
-# DEFAULT, NOT CONFIRMED BY COOPER.
+DELTA_COMMENT = """# Delta filtering. Off by default: Cooper's list is treated as already
+# screened on delta, so every pick on it is eligible.
 # This is a curated pick list from a paid service. We assume the delta columns
 # document upstream selections; filtering here would discard paid-for picks.
 # TVT-DELTA appears to use 0-100, not Schwab's 0-1 scale. For source: tvt,
@@ -111,7 +94,7 @@ def _pct_text(value) -> str:
 
 
 def _describe(key: str, values: dict) -> str:
-    """The current value a confirmation marker covers, in plain words."""
+    """One setting group's current value, in plain words."""
     if key == "spending_cap":
         cap = values.get("max_dollars_per_position")
         return f"${float(cap):g} per pick, checked against ask × 100" if cap is not None else "not set"
@@ -169,17 +152,32 @@ def _mt_before_close(minutes) -> str:
     return fmt_display(close - timedelta(minutes=int(minutes)), with_day=False)
 
 
-def live_status(config_path) -> dict:
-    """Which settings still block a live run, for the dashboard."""
+LABELS = {
+    "buy_window": "Buying window",
+    "delta_ranking": "Order of buying",
+    "total_budget": "Total budget",
+    "spending_cap": "Per-pick cap",
+    "delta_filter": "Delta filter",
+    "entry_day_stops": "Stops on the day of purchase",
+    "next_day_exits": "Next-day exits",
+    "profit_point_trail": "10-point rule",
+    "ten_percent_stop": "Older 10% stops",
+    "exit_repricing": "Unfilled sells",
+}
+
+
+def settings_summary(config_path) -> dict:
+    """The current trading settings in plain words, for the dashboard."""
     try:
         raw = yaml.safe_load(Path(config_path).read_text(encoding="utf-8")) or {}
-        markers = setting_confirmations(raw.get("setting_confirmations"))
+        load_rules(config_path)
     except (ValueError, TypeError, OSError, yaml.YAMLError) as exc:
-        return {"live_blocked": True, "unconfirmed_settings": [],
-                "live_block_error": f"Rules file cannot be read: {exc}"}
-    pending = [{"key": key, "label": SETTING_LABELS[key], "current": _describe(key, raw)}
-               for key in unconfirmed_settings(markers)]
-    return {"live_blocked": bool(pending), "unconfirmed_settings": pending, "live_block_error": None}
+        return {"settings_summary": [], "settings_error": f"Rules file cannot be read: {exc}"}
+    delta = {**asdict(DeltaFilter()), **(raw.get("delta_filter") or {})}
+    values = {**raw, "delta_filter": delta}
+    return {"settings_summary": [{"key": k, "label": label, "current": _describe(k, values)}
+                                 for k, label in LABELS.items()],
+            "settings_error": None}
 
 
 def read_rules_dict(config_path) -> dict:
@@ -190,17 +188,12 @@ def read_rules_dict(config_path) -> dict:
         load_rules(path)
     except (ValueError, TypeError, OSError) as exc:
         warning = str(exc)
-    markers = setting_confirmations(raw.get("setting_confirmations"))
     out = {key: raw.get(key) for key in (*_REQUIRED_NUMERIC, *STOP_KEYS)}
     out.update({key: raw.get(key, default) for key, default in OPTIONAL_DEFAULTS.items()})
     delta = {**asdict(DeltaFilter()), **(raw.get("delta_filter") or {})}
-    metadata = [{**item, "current": _describe(item["key"], {**raw, "delta_filter": delta})}
-                for item in default_settings_metadata(markers)]
     out.update(
         exit_window={key: [_endpoint(v) for v in pair] for key, pair in (raw.get("exit_window") or {}).items()},
         delta_filter=delta,
-        setting_confirmations=markers,
-        default_settings=metadata,
         stop_keys=list(STOP_KEYS), default_stop_note=DEFAULT_STOP_NOTE,
         profit_trail_note=PROFIT_TRAIL_NOTE, hold_note=HOLD_NOTE,
         warning=warning, path=str(path),
@@ -269,50 +262,14 @@ def _render_yaml(body: dict) -> str:
         "cooper_drop_from_peak_pct": "\n".join("# " + line for line in [DEFAULT_STOP_NOTE]) + "\n",
         "max_dollars_per_position": SPENDING_COMMENT,
         "total_budget": BUDGET_COMMENT,
-        "profit_trail_points": "\n".join("# " + line for line in [PROFIT_TRAIL_NOTE]) + "\n"
-                               "# NEW SETTING, NOT CONFIRMED BY COOPER (arm default: from_entry).\n",
+        "profit_trail_points": "\n".join("# " + line for line in [PROFIT_TRAIL_NOTE]) + "\n",
         "delta_filter": DELTA_COMMENT,
-        "setting_confirmations": ("# Cooper-confirmation markers. Any false marker blocks live runs (dry runs are\n"
-                                  "# never blocked). Changing a setting's value resets its marker.\n"),
     }
-    text = "# Coopa Trada rules. Values below are adjustable; unconfirmed settings block live runs.\n"
+    text = "# Coopa Trada rules. Edit here or on the Settings page; every value is validated on load.\n"
     for key, value in body.items():
         text += comments.get(key, "")
         text += yaml.safe_dump({key: value}, sort_keys=False)
     return text
-
-
-def _covered_values(raw: dict, key: str):
-    """Normalized values a marker covers, so formatting differences are not changes."""
-    out = []
-    for name in CONFIRMATION_KEYS[key]:
-        value = raw.get(name)
-        if name == "delta_filter":
-            out.append(asdict(DeltaFilter.from_config(value)))
-        elif name in OPTIONAL_DEFAULTS:
-            value = raw.get(name, OPTIONAL_DEFAULTS[name])
-            out.append(value if isinstance(value, (str, bool)) or value is None else float(value))
-        else:
-            out.append(None if value in (None, "") else float(value))
-    return out
-
-
-def _next_confirmations(current: dict, body: dict, payload: dict) -> dict:
-    before = setting_confirmations(current.get("setting_confirmations"))
-    try:
-        requested = setting_confirmations(payload.get("setting_confirmations", before))
-    except ValueError as exc:
-        raise RulesValidationError(str(exc)) from None
-    result = {}
-    for key in before:
-        was, wants = before[key]["confirmed_by_cooper"], requested[key]["confirmed_by_cooper"]
-        try:
-            changed = _covered_values(current, key) != _covered_values(body, key)
-        except (ValueError, TypeError):
-            changed = True  # the old value was unreadable; treat it as a change
-        # An untouched checkbox does not carry a confirmation over to a new value.
-        result[key] = {"confirmed_by_cooper": wants and (wants != was or not changed)}
-    return result
 
 
 def write_rules(config_path, payload: dict) -> dict:
@@ -322,7 +279,6 @@ def write_rules(config_path, payload: dict) -> dict:
     # Preserve the existing filter if an older API client omits it.
     if "delta_filter" not in payload:
         body["delta_filter"] = asdict(DeltaFilter.from_config(current.get("delta_filter")))
-    body["setting_confirmations"] = _next_confirmations(current, body, payload)
     fd, temporary = tempfile.mkstemp(dir=target.parent, suffix=".yaml")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:

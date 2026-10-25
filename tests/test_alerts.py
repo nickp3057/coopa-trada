@@ -17,7 +17,7 @@ from coopa_trada.engine import Engine
 from coopa_trada.exits import Quote
 from coopa_trada.idempotency import Intent
 from coopa_trada.models import AssetClass, Right, Signal
-from coopa_trada.rules import SETTING_LABELS, load_rules
+from coopa_trada.rules import load_rules
 from coopa_trada.store import Store
 
 UTC = timezone.utc
@@ -115,10 +115,8 @@ def _signal():
     return Signal("sig1", "AMD", Right.CALL, 100, date(2026, 9, 4), 1, AssetClass.SINGLE_NAME, NOW, "test")
 
 
-def _engine(store, fake, *, mode=Mode.DRY_RUN, confirmed=True, source=None, clock=None):
+def _engine(store, fake, *, mode=Mode.DRY_RUN, source=None, clock=None):
     rules = load_rules("config/rules.example.yaml")
-    if confirmed:
-        rules = replace(rules, setting_confirmations={k: {"confirmed_by_cooper": True} for k in SETTING_LABELS})
     broker = DryRunBroker(store)
     broker.mode = mode
     clock = clock or [NOW]
@@ -179,8 +177,8 @@ def test_exit_not_filling_alerts_after_a_few_minutes(store, fake):
 
 
 def test_refused_run_alerts(store, fake):
-    with pytest.raises(ValueError, match="unconfirmed"):
-        _engine(store, fake, mode=Mode.LIVE, confirmed=False).run(DAY)
+    with pytest.raises(ValueError, match="today"):
+        _engine(store, fake, mode=Mode.LIVE).run(date(2026, 9, 1))  # live runs must be for today
     assert [a.kind for a in fake.sent] == ["run_refused"]
     assert fake.sent[0].title == "Coopa Trada: run refused"
 

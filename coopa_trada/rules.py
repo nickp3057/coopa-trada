@@ -21,48 +21,10 @@ if TYPE_CHECKING:
     from .contracts import ResolvedContract
     from .models import Signal
 
-__all__ = ["Rules", "load_rules", "PositionSizer", "FixedQuantitySizer", "DeltaFilter", "setting_confirmations", "default_settings_metadata", "unconfirmed_settings"]
+__all__ = ["Rules", "load_rules", "PositionSizer", "FixedQuantitySizer", "DeltaFilter", "RANK_DELTA_SOURCES"]
 
 
-SETTING_LABELS = {
-    "spending_cap": "spending cap",
-    "ten_percent_stop": "10% stop basis",
-    "delta_filter": "delta filter",
-    "profit_point_trail": "profit-point trailing exit",
-    "entry_day_stops": "stops on the day of entry",
-    "next_day_exits": "next-day exit start",
-    "total_budget": "total budget",
-    "delta_ranking": "which delta ranks picks",
-    "exit_repricing": "exit repricing",
-    "buy_window": "buying window",
-}
 RANK_DELTA_SOURCES = ("schwab_live", "tvt")
-
-
-def setting_confirmations(raw: dict | None = None) -> dict:
-    """One registry for all hand-edited confirmation markers; missing means false."""
-    raw = {} if raw is None else raw
-    if not isinstance(raw, dict):
-        raise ValueError("setting_confirmations must be a mapping")
-    if set(raw) - SETTING_LABELS.keys():
-        raise ValueError("Unknown setting in setting_confirmations")
-    result = {}
-    for key in SETTING_LABELS:
-        marker = raw.get(key, {"confirmed_by_cooper": False})
-        if not isinstance(marker, dict) or type(marker.get("confirmed_by_cooper")) is not bool:
-            raise ValueError(f"setting_confirmations.{key}.confirmed_by_cooper must be true or false")
-        result[key] = {"confirmed_by_cooper": marker["confirmed_by_cooper"]}
-    return result
-
-
-def default_settings_metadata(markers: dict) -> list[dict]:
-    return [{"key": key, "label": label, **markers[key]}
-            for key, label in SETTING_LABELS.items()]
-
-
-def unconfirmed_settings(markers: dict) -> list[str]:
-    """Keys still awaiting Cooper's confirmation. Any entry blocks a live run."""
-    return [key for key in SETTING_LABELS if not markers[key]["confirmed_by_cooper"]]
 
 
 @dataclass(frozen=True)
@@ -117,7 +79,6 @@ class Rules:
     max_dollars_per_position: float
     poll_interval_seconds: int
     delta_filter: DeltaFilter = field(default_factory=DeltaFilter)
-    setting_confirmations: dict = field(default_factory=setting_confirmations)
     # Optional existing strategies; null leaves the corresponding strategy unwired.
     cooper_drop_from_peak_pct: float | None = None
     cooper_drop_from_entry_pct: float | None = None
@@ -152,15 +113,6 @@ class Rules:
     no_new_buys_minutes_before_close: int = 3
     exit_reprice_after_seconds: int = 60
     exit_reprice_max_attempts: int = 5
-
-    def live_block_reason(self) -> str | None:
-        """Why a live run must not start, or None. Dry runs ignore this."""
-        pending = unconfirmed_settings(self.setting_confirmations)
-        if not pending:
-            return None
-        labels = ", ".join(SETTING_LABELS[key] for key in pending)
-        return (f"Live run blocked: unconfirmed settings: {labels}. "
-                "Confirm each with Cooper, then tick Confirm in Settings.")
 
 
 class PositionSizer(Protocol):
@@ -332,7 +284,6 @@ def load_rules(path: str | Path) -> Rules:
         profit_trail_points=trail_points,
         profit_trail_arm=trail_arm,
         delta_filter=DeltaFilter.from_config(data.get("delta_filter")),
-        setting_confirmations=setting_confirmations(data.get("setting_confirmations")),
         **buy_window,
         exit_window=_coerce_exit_window(data["exit_window"]),
         trailing_stop_pct=_pct("trailing_stop_pct", data["trailing_stop_pct"]),

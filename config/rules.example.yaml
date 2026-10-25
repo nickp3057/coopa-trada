@@ -8,7 +8,7 @@
 #   earliest_buy_minutes_before_close: no buys before this (a guard against a
 #     list confirmed hours early). 30 = 1:30 PM MT on a normal day.
 #   no_new_buys_minutes_before_close: no buys at or after this. 3 = 1:57 PM MT.
-# NEW SETTINGS, NOT CONFIRMED BY COOPER.
+#
 earliest_buy_minutes_before_close: 30
 no_new_buys_minutes_before_close: 3
 
@@ -30,14 +30,13 @@ hard_stop_loss_pct: 0.40
 # Take profit: exit when mid rises this fraction above the entry price.
 take_profit_pct: 0.60
 
-# DEFAULT, NOT CONFIRMED BY COOPER: peak is the better reading of his wording
-# ("exit at the high", "drops 10% between the times I said"). The observed session
-# peak is always >= entry, so a 10% retrace triggers at a higher price when the
-# peak exceeds entry: it is the earlier, tighter of the two readings.
-# Both fields remain editable. Blank = not wired. If both are set, both are
-# active and the first trigger wins. Keep the standard 25% / 40% / 60% exits
-# alongside these: additional triggers can make an exit earlier, never later.
-cooper_drop_from_peak_pct: 0.10    # DEFAULT, NOT CONFIRMED
+# Older readings of Cooper's "10%" rule, from before his answer. Drop from
+# peak: sell when the mid falls this fraction below its highest. With the
+# 10-point rule below active from entry, its trigger is never higher than the
+# 10-point rule's, so it only matters if the 10-point rule is switched to
+# "once in profit" or off. Blank = off. Drop from entry: a plain stop below
+# the price paid; off by default.
+cooper_drop_from_peak_pct: 0.10
 cooper_drop_from_entry_pct:        # blank = not wired
 
 # Cooper's 10-point rule (his answer, 2026-10): sell when the profit % drops 10
@@ -46,7 +45,7 @@ cooper_drop_from_entry_pct:        # blank = not wired
 # Alongside every other exit; whichever fires first wins. Blank = off.
 # profit_trail_arm: from_entry (literal reading; before any gain it acts like a
 # -10% stop) or in_profit (only after the price has been above entry).
-# NEW SETTING, NOT CONFIRMED BY COOPER.
+#
 profit_trail_points: 10
 profit_trail_arm: from_entry
 
@@ -58,7 +57,7 @@ profit_trail_arm: from_entry
 #   profit-point trail) also protect a position on the day it is bought.
 # held_exit_start: when held positions start being watched the next day:
 #   open | "HH:MM" (New York) | minutes before the close.
-# NEW SETTINGS, NOT CONFIRMED BY COOPER.
+#
 stops_on_entry_day: true
 held_exit_start: open
 
@@ -69,7 +68,7 @@ held_exit_start: open
 # and bought in that order while each still fits; a pick that does not fit is
 # skipped and logged, and cheaper picks after it are still considered.
 # rank_delta_source: schwab_live (Schwab's option chain at buying time) or tvt
-# (the list's TVT-DELTA column). NEW SETTINGS, NOT CONFIRMED BY COOPER.
+# (the list's TVT-DELTA column).
 total_budget: 300
 rank_delta_source: schwab_live
 
@@ -84,7 +83,7 @@ max_dollars_per_position: 300
 # Never a market order. After exit_reprice_max_attempts replacements, a person
 # is alerted (Mac + phone) and the last order is left working. 0 = off.
 # Only lowers the price: if the bid is not below the working order's price, it
-# waits. NEW SETTINGS, NOT CONFIRMED BY COOPER.
+# waits.
 exit_reprice_after_seconds: 60
 exit_reprice_max_attempts: 5
 
@@ -93,7 +92,6 @@ poll_interval_seconds: 30
 
 # Delta filtering. Off by default -- we assume Cooper's source already screens
 # on delta and sends only the picks it wants traded.
-# DEFAULT, NOT CONFIRMED BY COOPER.
 # This is a curated pick list from a paid service. The delta columns almost
 # certainly document upstream picks; filtering here would discard paid-for picks.
 # TVT-DELTA appears on a 0-100 scale, unlike Schwab's 0-1. For source: tvt,
@@ -103,30 +101,3 @@ delta_filter:
   source: schwab          # "schwab" | "tvt" -- which column to read
   min_abs_delta: 0.30     # inclusive; ignored while enabled: false
   max_abs_delta: 0.80     # inclusive; ignored while enabled: false
-
-# Cooper-confirmation markers. Any false marker BLOCKS live runs (dry runs are
-# never blocked); Engine.run enforces this for both the CLI and the web UI.
-# Set them here or with the Confirm checkboxes in Settings. Changing a
-# confirmed setting's value in Settings resets its marker unless the same save
-# re-confirms it.
-setting_confirmations:
-  spending_cap:
-    confirmed_by_cooper: false
-  ten_percent_stop:
-    confirmed_by_cooper: false
-  delta_filter:
-    confirmed_by_cooper: false
-  profit_point_trail:
-    confirmed_by_cooper: false
-  entry_day_stops:
-    confirmed_by_cooper: false
-  next_day_exits:
-    confirmed_by_cooper: false
-  total_budget:
-    confirmed_by_cooper: false
-  delta_ranking:
-    confirmed_by_cooper: false
-  exit_repricing:
-    confirmed_by_cooper: false
-  buy_window:
-    confirmed_by_cooper: false

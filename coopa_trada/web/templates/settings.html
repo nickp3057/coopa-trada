@@ -14,12 +14,8 @@
       </label>
     </fieldset>
 
-    <fieldset class="warn-fieldset">
+    <fieldset>
       <legend>Buying window (buys happen when picks are confirmed)</legend>
-      <div class="confirm-row" data-confirm-key="buy_window">
-        <span class="badge badge-warn" data-badge>Unconfirmed</span>
-        <label class="inline"><input type="checkbox" name="confirm_buy_window"> Confirmed with Cooper</label>
-      </div>
       <p class="hint">The bot buys as soon as a pick list is confirmed (Telegram or this
         dashboard), but only inside this window, counted back from the real close, so half
         days move it earlier. On a normal day the close is 2:00 PM Mountain.</p>
@@ -52,12 +48,8 @@
       </label>
     </fieldset>
 
-    <fieldset class="warn-fieldset">
-      <legend>Cooper 10% stop &mdash; ambiguous, pending Cooper</legend>
-      <div class="confirm-row" data-confirm-key="ten_percent_stop">
-        <span class="badge badge-warn" data-badge>Unconfirmed</span>
-        <label class="inline"><input type="checkbox" name="confirm_ten_percent_stop"> Confirmed with Cooper</label>
-      </div>
+    <fieldset>
+      <legend>Older 10% stops (from before the 10-point rule)</legend>
       <p class="hint" id="ambiguous-note"></p>
       <label class="block">Drop from session peak (blank = not wired)
         <input name="cooper_drop_from_peak_pct" type="number" min="0" max="0.999" step="0.01">
@@ -67,12 +59,8 @@
       </label>
     </fieldset>
 
-    <fieldset class="warn-fieldset">
-      <legend>Profit-point trailing exit (Cooper&rsquo;s 10-point rule)</legend>
-      <div class="confirm-row" data-confirm-key="profit_point_trail">
-        <span class="badge badge-warn" data-badge>Unconfirmed</span>
-        <label class="inline"><input type="checkbox" name="confirm_profit_point_trail"> Confirmed with Cooper</label>
-      </div>
+    <fieldset>
+      <legend>10-point rule (profit-point trailing exit)</legend>
       <p class="hint" id="profit-trail-note"></p>
       <label class="block">Percentage points below peak profit (blank = off)
         <input name="profit_trail_points" type="number" min="0.01" max="99.99" step="0.01">
@@ -85,39 +73,23 @@
       </label>
     </fieldset>
 
-    <fieldset class="warn-fieldset">
+    <fieldset>
       <legend>Hold logic (take-profit sells today, otherwise hold to the next trading day)</legend>
       <p class="hint" id="hold-note"></p>
-      <div class="confirm-row" data-confirm-key="entry_day_stops">
-        <span class="badge badge-warn" data-badge>Unconfirmed</span>
-        <label class="inline"><input type="checkbox" name="confirm_entry_day_stops"> Confirmed with Cooper</label>
-      </div>
       <label class="inline"><input type="checkbox" name="stops_on_entry_day">
         Stops also protect a position on the day it is bought</label>
-      <div class="confirm-row" data-confirm-key="next_day_exits">
-        <span class="badge badge-warn" data-badge>Unconfirmed</span>
-        <label class="inline"><input type="checkbox" name="confirm_next_day_exits"> Confirmed with Cooper</label>
-      </div>
       <label class="block">Next-day exits start (<code>open</code>, New York <code>HH:MM</code>, or minutes before close)
         <input name="held_exit_start" type="text">
       </label>
     </fieldset>
 
-    <fieldset class="warn-fieldset">
+    <fieldset>
       <legend>Total budget and ranking</legend>
-      <div class="confirm-row" data-confirm-key="total_budget">
-        <span class="badge badge-warn" data-badge>Unconfirmed</span>
-        <label class="inline"><input type="checkbox" name="confirm_total_budget"> Confirmed with Cooper</label>
-      </div>
       <label class="block">Total budget: the most all open positions together may cost ($, at ask &times; 100)
         <input name="total_budget" type="number" min="0.01" step="0.01" required>
       </label>
       <p class="hint">Includes positions held from earlier days and buy orders still working.
         There is no limit on the number of positions.</p>
-      <div class="confirm-row" data-confirm-key="delta_ranking">
-        <span class="badge badge-warn" data-badge>Unconfirmed</span>
-        <label class="inline"><input type="checkbox" name="confirm_delta_ranking"> Confirmed with Cooper</label>
-      </div>
       <label class="block">Rank picks by (highest |delta| bought first)
         <select name="rank_delta_source">
           <option value="schwab_live">Schwab&rsquo;s live delta at buying time</option>
@@ -126,12 +98,8 @@
       </label>
     </fieldset>
 
-    <fieldset class="warn-fieldset">
+    <fieldset>
       <legend>Exit repricing</legend>
-      <div class="confirm-row" data-confirm-key="exit_repricing">
-        <span class="badge badge-warn" data-badge>Unconfirmed</span>
-        <label class="inline"><input type="checkbox" name="confirm_exit_repricing"> Confirmed with Cooper</label>
-      </div>
       <p class="hint">A real sell order that has not filled is canceled and replaced at the current
         bid (only ever lower, never a market order). After the last attempt you get an alert.</p>
       <label class="block">Reprice an unfilled sell after (seconds)
@@ -142,24 +110,16 @@
       </label>
     </fieldset>
 
-    <fieldset class="warn-fieldset">
+    <fieldset>
       <legend>Spending cap</legend>
-      <div class="confirm-row" data-confirm-key="spending_cap">
-        <span class="badge badge-warn" data-badge>Unconfirmed</span>
-        <label class="inline"><input type="checkbox" name="confirm_spending_cap"> Confirmed with Cooper</label>
-      </div>
       <label class="block">Max dollars per position (skip gate &mdash; 1 contract per pick either way)
         <input name="max_dollars_per_position" type="number" min="0.01" step="0.01" required>
       </label>
       <p class="hint">A pick is skipped when one contract at the ask &times; 100 costs more than this.</p>
     </fieldset>
 
-    <fieldset class="warn-fieldset">
+    <fieldset>
       <legend>Delta filter</legend>
-      <div class="confirm-row" data-confirm-key="delta_filter">
-        <span class="badge badge-warn" data-badge>Unconfirmed</span>
-        <label class="inline"><input type="checkbox" name="confirm_delta_filter"> Confirmed with Cooper</label>
-      </div>
       <p class="hint">Off by default: Cooper&rsquo;s paid pick list is assumed to be screened on
         delta already, so filtering here could discard picks. Bounds are inclusive and
         compare the absolute delta. Schwab delta uses a 0&ndash;1 scale; TVT delta appears to

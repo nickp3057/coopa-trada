@@ -14,7 +14,7 @@ from coopa_trada.contracts import SyntheticResolver
 from coopa_trada.engine import Engine
 from coopa_trada.exits import Quote
 from coopa_trada.models import AssetClass, Right, Signal
-from coopa_trada.rules import SETTING_LABELS, load_rules
+from coopa_trada.rules import load_rules
 from coopa_trada.schwab_token import (START_MARGIN, hold_needed_until, next_run_day,
                                       read_token_status, start_block_reason)
 from coopa_trada.store import Store
@@ -22,8 +22,7 @@ from coopa_trada.wiring import token_status
 
 NY = ZoneInfo("America/New_York")
 CAL = CalendarService()
-RULES = replace(load_rules("config/rules.example.yaml"),
-                setting_confirmations={k: {"confirmed_by_cooper": True} for k in SETTING_LABELS})
+RULES = load_rules("config/rules.example.yaml")
 
 
 def ny(*args):

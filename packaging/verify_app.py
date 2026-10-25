@@ -12,8 +12,8 @@ Checks:
   1. First run: example files created, .env NOT created, mode is DRY-RUN.
   2. Live start refused without the typed phrase, then without LIVE_TRADING=1.
   3. A dry run completes on synthetic data with no token.
-  4. With LIVE_TRADING=1 in the .env next to the app: live refused while
-     settings are unconfirmed, then refused because Schwab is not set up.
+  4. With LIVE_TRADING=1 in the .env next to the app: live refused because
+     Schwab is not set up.
   5. Alerts: Settings lists the channels (log-only here, so nothing pops up) and
      Send test alert reports a delivery; keep-awake is reported and released
      after the dry run.
@@ -179,13 +179,6 @@ def run_checks(target: str, app_path: Path | None) -> None:
             app.start()
             status, mode = call(app.port, "GET", "/api/mode")
             check(mode["live_env_enabled"], "the .env next to the app is loaded")
-            status, body = live_start(app.port)
-            check(status == 409 and "unconfirmed settings" in body["error"],
-                  "live refused while settings are unconfirmed")
-            status, rules = call(app.port, "GET", "/api/rules")
-            rules["setting_confirmations"] = {k: {"confirmed_by_cooper": True} for k in rules["setting_confirmations"]}
-            status, _ = call(app.port, "POST", "/api/rules", rules)
-            check(status == 200, "settings confirmed through Settings")
             status, body = live_start(app.port)
             check(status == 409 and "Schwab is not set up" in body["error"],
                   "live refused because Schwab is not set up")
