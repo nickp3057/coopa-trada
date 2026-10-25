@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Give one person their own bot and login:  bash packaging/server/add-person.sh cooper 8771
+# Give one person their own bot and login:
+#   bash packaging/server/add-person.sh cooper 8771            (set the password here, now)
+#   bash packaging/server/add-person.sh cooper 8771 --invite   (send them a sign-up link)
 # Creates ~/coopa-data/NAME (its own .env, settings, trade log, Schwab login),
 # starts coopa-trada@NAME, and adds NAME to the login website (password + 2FA).
 set -euo pipefail
@@ -23,7 +25,11 @@ if [ ! -f "$HOME_DIR/.env" ]; then
   chmod 600 "$HOME_DIR/.env"
 fi
 sudo systemctl enable --now "coopa-trada@$NAME" >/dev/null
-"$DIR/.venv/bin/python" -m coopa_trada.gateway --config "$DATA/gateway.yaml" add-user "$NAME" --port "$PORT"
+if [ "${3:-}" = "--invite" ]; then
+  "$DIR/.venv/bin/python" -m coopa_trada.gateway --config "$DATA/gateway.yaml" invite "$NAME" --port "$PORT"
+else
+  "$DIR/.venv/bin/python" -m coopa_trada.gateway --config "$DATA/gateway.yaml" add-user "$NAME" --port "$PORT"
+fi
 sudo systemctl enable coopa-gateway >/dev/null
 sudo systemctl restart coopa-gateway
 echo

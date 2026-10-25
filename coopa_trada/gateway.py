@@ -8,8 +8,13 @@ authenticator app, then forwards that person, and only that person, to their
 own copy. Cooper logging in reaches Cooper's bot; Nick logging in reaches
 Nick's. Nothing in one copy can reach the other.
 
-    python -m coopa_trada.gateway add-user cooper --port 8771
+    python -m coopa_trada.gateway add-user cooper --port 8771   (at the server)
+    python -m coopa_trada.gateway invite cooper --port 8771     (a sign-up link)
     python -m coopa_trada.gateway serve
+
+An invite is a one-time sign-up link (valid 24 hours by default) for a name
+and bot chosen at the server: the person opens it, picks a password and sets
+up the 6-digit codes in the browser. Only a hash of the link is stored.
 
 Security: passwords are stored as salted hashes (never the password); the
 6-digit codes are standard TOTP (RFC 6238), each usable once; 5 wrong tries for
@@ -93,10 +98,31 @@ class User:
 
 
 @dataclass
+class Invite:
+    name: str
+    backend: str
+    token_hash: str       # sha256 of the link's secret part; the link itself is never stored
+    expires: float        # unix time
+    totp_secret: str      # shown on the sign-up page so the person can scan it
+
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+@dataclass
 class GatewayConfig:
     path: Path
     secret_key: str
     users: dict[str, User] = field(default_factory=dict)
+    invites: dict[str, Invite] = field(default_factory=dict)
+
+    def invite_for(self, token: str, now: float) -> Invite | None:
+        wanted = _token_hash(token or "")
+        for invite in self.invites.values():
+            if hmac.compare_digest(invite.token_hash, wanted) and invite.expires > now:
+                return invite
+        return None
 
     @classmethod
     def load(cls, path=DEFAULT_CONFIG, *, create: bool = False) -> "GatewayConfig":
@@ -110,14 +136,18 @@ class GatewayConfig:
         users = {name: User(name, u["password_hash"], u["totp_secret"], u["backend"],
                             int(u.get("session_version", 1)))
                  for name, u in (raw.get("users") or {}).items()}
-        return cls(path, raw["secret_key"], users)
+        invites = {name: Invite(name, i["backend"], i["token_hash"], float(i["expires"]), i["totp_secret"])
+                   for name, i in (raw.get("invites") or {}).items()}
+        return cls(path, raw["secret_key"], users, invites)
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         body = {"secret_key": self.secret_key,
                 "users": {u.name: {"password_hash": u.password_hash, "totp_secret": u.totp_secret,
                                    "backend": u.backend, "session_version": u.session_version}
-                          for u in self.users.values()}}
+                          for u in self.users.values()},
+                "invites": {i.name: {"backend": i.backend, "token_hash": i.token_hash, "expires": i.expires,
+                                     "totp_secret": i.totp_secret} for i in self.invites.values()}}
         fd, tmp = tempfile.mkstemp(dir=self.path.parent, suffix=".yaml")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -192,6 +222,32 @@ p.err{{color:var(--bad);margin:12px 0 0}}
 </form></body></html>"""
 
 
+def _mtime(path: Path) -> int | None:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+_SETUP_PAGE = _PAGE.split("<form")[0].replace("Log in</title>", "Sign up</title>") + """
+<form method="post" action="/setup/{token}" autocomplete="off">
+<h1>Welcome, {name}</h1>
+<p style="color:var(--muted);font-size:14px">Set up your Coopa Trada login. This link works once.</p>
+<label for="p">Choose a password (at least {min} characters)</label>
+<input id="p" name="password" type="password" autocomplete="new-password" required minlength="{min}">
+<label for="p2">Type it again</label>
+<input id="p2" name="password2" type="password" autocomplete="new-password" required minlength="{min}">
+<label>Install an authenticator app on your phone (Google Authenticator, Microsoft Authenticator,
+1Password&hellip;), tap +, and scan this:</label>
+<div style="background:#fff;padding:8px;border-radius:6px;width:max-content;margin:6px 0">{qr}</div>
+<p style="font-size:13px;color:var(--muted);word-break:break-all">On this phone? Tap
+<a href="{uri}">add to authenticator</a>, or choose "enter a setup key" and type: <b>{key}</b></p>
+<label for="c">Then type the 6-digit code the app shows</label>
+<input id="c" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{{6,7}}" required>
+<button type="submit">Create my login</button>{error}
+</form></body></html>"""
+
+
 def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
     import httpx
     from flask import Flask, make_response, redirect, request
@@ -202,6 +258,20 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
     app.config["MAX_CONTENT_LENGTH"] = 9 * 1024 * 1024
     signer = URLSafeTimedSerializer(config.secret_key, salt="coopa-gateway-session")
     throttle = Throttle(clock)
+    state = {"config": config, "mtime": _mtime(config.path)}
+    save_lock = threading.Lock()
+
+    def cfg() -> GatewayConfig:
+        """The users file, re-read when it changes (an invite or reset made at the
+        server takes effect without a restart)."""
+        mtime = _mtime(config.path)
+        if mtime is not None and mtime != state["mtime"]:
+            try:
+                state["config"] = GatewayConfig.load(config.path)
+                state["mtime"] = mtime
+            except Exception:  # noqa: BLE001 - half-written file: keep the last good copy
+                pass
+        return state["config"]
     last_step: dict[str, int] = {}
     client = http_client or httpx.Client(timeout=httpx.Timeout(150.0, connect=5.0), follow_redirects=False)
 
@@ -216,7 +286,7 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
             data = signer.loads(token, max_age=SESSION_SECONDS)
         except (BadSignature, TypeError):
             return None
-        user = config.users.get(data.get("u"))
+        user = cfg().users.get(data.get("u"))
         if user is None or data.get("v") != user.session_version:
             return None
         return user
@@ -252,7 +322,7 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
         keys = (f"user:{name}", f"ip:{ip}")
         if throttle.locked(*keys):
             return page(name, "Too many wrong tries. Wait 15 minutes, then try again.", nxt, 429)
-        user = config.users.get(name)
+        user = cfg().users.get(name)
         password_ok = user is not None and check_password(user.password_hash, request.form.get("password", ""))
         step = (verify_totp(user.totp_secret, request.form.get("code", ""), clock(),
                             after_step=last_step.get(name, -1)) if password_ok else None)
@@ -261,10 +331,63 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
             return page(name, "Wrong name, password or code.", nxt, 401)
         last_step[name] = step
         throttle.clear(*keys)
-        resp = redirect(nxt, 303)
+        return start_session(redirect(nxt, 303), user)
+
+    def start_session(resp, user: User):
         resp.set_cookie(COOKIE, signer.dumps({"u": user.name, "v": user.session_version}),
                         max_age=SESSION_SECONDS, httponly=True, samesite="Strict", secure=https(), path="/")
         return resp
+
+    def setup_page(invite: Invite, token: str, error: str = "", status: int = 200):
+        uri = otpauth_uri(invite.name, invite.totp_secret)
+        try:
+            import segno
+            qr = segno.make(uri, error="m").svg_inline(scale=5, dark="#000", light="#fff")
+        except ImportError:
+            qr = ""
+        body = _SETUP_PAGE.format(name=html.escape(invite.name), qr=qr, key=html.escape(invite.totp_secret),
+                                  uri=html.escape(uri), token=html.escape(token), min=MIN_PASSWORD,
+                                  error=f'<p class="err" role="alert">{html.escape(error)}</p>' if error else "")
+        resp = make_response(body, status)
+        resp.headers["Cache-Control"] = "no-store"
+        return resp
+
+    @app.get("/setup/<token>")
+    def setup_form(token):
+        invite = cfg().invite_for(token, clock())
+        if invite is None:
+            return make_response("This sign-up link is used up or has expired. Ask Nick for a new one.", 404)
+        return setup_page(invite, token)
+
+    @app.post("/setup/<token>")
+    def setup(token):
+        ip = request.headers.get("X-Forwarded-For", request.remote_addr or "").split(",")[-1].strip()
+        if throttle.locked(f"ip:{ip}"):
+            return make_response("Too many wrong tries. Wait 15 minutes, then try again.", 429)
+        invite = cfg().invite_for(token, clock())
+        if invite is None:
+            return make_response("This sign-up link is used up or has expired. Ask Nick for a new one.", 404)
+        password = request.form.get("password", "")
+        if len(password) < MIN_PASSWORD:
+            return setup_page(invite, token, f"Choose a password of at least {MIN_PASSWORD} characters.", 400)
+        if password != request.form.get("password2", ""):
+            return setup_page(invite, token, "The two passwords don't match.", 400)
+        step = verify_totp(invite.totp_secret, request.form.get("code", ""), clock())
+        if step is None:
+            throttle.fail(f"ip:{ip}")
+            return setup_page(invite, token, "That code doesn't match. Check the app shows Coopa Trada, "
+                                             "and that the phone's clock is set automatically.", 400)
+        with save_lock:
+            current = GatewayConfig.load(config.path)
+            if current.invite_for(token, clock()) is None or invite.name in current.users:
+                return make_response("This sign-up link is used up. Log in instead.", 409)
+            user = User(invite.name, hash_password(password), invite.totp_secret, invite.backend)
+            current.users[user.name] = user
+            del current.invites[invite.name]
+            current.save()
+        last_step[user.name] = step
+        cfg()
+        return start_session(redirect("/", 303), user)
 
     @app.route("/logout", methods=["GET", "POST"])
     def logout():
@@ -301,6 +424,14 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
 
 
 # -- command line ------------------------------------------------------------------
+def _saved_site(config_path: Path) -> str | None:
+    """The website address setup-https.sh saved next to the users file."""
+    try:
+        return (Path(config_path).parent / "site").read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
 def _ask_password(name: str) -> str:
     while True:
         first = getpass.getpass(f"New password for {name} (at least {MIN_PASSWORD} characters): ")
@@ -340,6 +471,11 @@ def main(argv=None) -> int:
     add = sub.add_parser("add-user", help="add a person and the port of their bot")
     add.add_argument("name")
     add.add_argument("--port", type=int, required=True, help="the port of this person's bot, e.g. 8771")
+    inv = sub.add_parser("invite", help="make a one-time sign-up link for a person")
+    inv.add_argument("name")
+    inv.add_argument("--port", type=int, required=True, help="the port of this person's bot, e.g. 8771")
+    inv.add_argument("--hours", type=float, default=24, help="how long the link works (default 24)")
+    inv.add_argument("--site", help="the website address (default: from setup-https.sh)")
     for cmd in ("reset-password", "reset-2fa", "remove-user"):
         sub.add_parser(cmd).add_argument("name")
     sub.add_parser("list")
@@ -354,11 +490,29 @@ def main(argv=None) -> int:
         run_simple(args.host, args.port, create_gateway(config), threaded=True)
         return 0
 
-    config = GatewayConfig.load(args.config, create=args.command == "add-user")
+    config = GatewayConfig.load(args.config, create=args.command in ("add-user", "invite"))
     name = getattr(args, "name", "").strip().lower()
     if args.command == "list":
         for user in config.users.values():
             print(f"{user.name}: bot at {user.backend}")
+        for invite in config.invites.values():
+            state = "expired" if invite.expires < time.time() else "waiting"
+            print(f"{invite.name}: sign-up link {state} (bot at {invite.backend})")
+        return 0
+    if args.command == "invite":
+        if not name.isidentifier():
+            raise SystemExit("Use a simple name: letters, digits and _ only")
+        if name in config.users:
+            raise SystemExit(f"{name} already has a login (use reset-password or reset-2fa)")
+        token = secrets.token_urlsafe(32)
+        config.invites[name] = Invite(name, f"http://127.0.0.1:{args.port}", _token_hash(token),
+                                      time.time() + args.hours * 3600, new_totp_secret())
+        config.save()
+        site = (args.site or _saved_site(config.path) or "https://YOUR-SITE").rstrip("/")
+        print(f"\nSign-up link for {name} (works once, for {args.hours:g} hours):\n\n  {site}/setup/{token}\n\n"
+              "Send it to them privately (a text or DM). Anyone with the link can create this login.")
+        if site == "https://YOUR-SITE":
+            print("Replace https://YOUR-SITE with your website address.")
         return 0
     if args.command == "add-user":
         if not name.isidentifier():

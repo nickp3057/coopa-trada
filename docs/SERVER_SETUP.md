@@ -67,7 +67,19 @@ bash packaging/server/add-person.sh cooper 8771
 bash packaging/server/add-person.sh nick 8772
 ```
 
-Each one asks for that person's **website password** (12+ characters, twice), then
+**Or send a sign-up link** instead (the person picks their own password and sets up the
+6-digit codes on their phone, from anywhere):
+
+```bash
+bash packaging/server/add-person.sh cooper 8771 --invite
+```
+
+It prints a link like `https://coopatrada.duckdns.org/setup/...`. Text it to them
+privately. It works **once** and expires after **24 hours**; make a new one with
+`.venv/bin/python -m coopa_trada.gateway --config ~/coopa-data/gateway.yaml invite cooper --port 8771`.
+You still choose the name and bot; the link can't make any other login.
+
+Without `--invite`, each one asks for that person's **website password** (12+ characters, twice), then
 shows a **QR code**. That person opens an authenticator app on their phone
 (Google Authenticator, Microsoft Authenticator, 1Password…), taps **+**, scans it, and
 types the 6-digit code to check it. If Cooper isn't with you, press Enter to skip the

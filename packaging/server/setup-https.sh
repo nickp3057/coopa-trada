@@ -15,4 +15,6 @@ $SITE {
 CADDY
 sudo systemctl enable caddy >/dev/null
 sudo systemctl restart caddy
+mkdir -p "${COOPA_DATA:-$HOME/coopa-data}"
+echo "https://$SITE" > "${COOPA_DATA:-$HOME/coopa-data}/site"   # used in sign-up links
 echo "Done. In a minute, open https://$SITE (Caddy is fetching the certificate)."

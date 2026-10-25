@@ -184,3 +184,94 @@ def test_the_bots_stylesheets_and_scripts_are_forwarded(setup):
     for path in ("/static/app.css", "/static/dashboard.js"):
         assert client.get(path).status_code == 200
         assert bots.calls[-1][1] == "http://127.0.0.1:8771" + path
+
+
+# -- sign-up links ----------------------------------------------------------------------
+import time
+
+def invite(config_path, name="cooper", port=8771, hours=24, site="https://coopa.example"):
+    import io
+    from contextlib import redirect_stdout
+    out = io.StringIO()
+    with redirect_stdout(out):
+        gw.main(["--config", str(config_path), "invite", name, "--port", str(port), "--hours", str(hours),
+                 "--site", site])
+    link = next(line.strip() for line in out.getvalue().splitlines() if "/setup/" in line)
+    return link.split("/setup/")[1]
+
+
+@pytest.fixture
+def fresh(tmp_path):
+    """A gateway with only Nick; Cooper gets a sign-up link."""
+    config = gw.GatewayConfig(tmp_path / "gateway.yaml", "k" * 64)
+    config.users["nick"] = gw.User("nick", gw.hash_password("nick-long-password"), gw.new_totp_secret(),
+                                   "http://127.0.0.1:8772")
+    config.save()
+    bots = Bots()
+    clock = [time.time()]  # the invite command stamps links with the real time
+    app = gw.create_gateway(gw.GatewayConfig.load(config.path), clock=lambda: clock[0], http_client=bots)
+    return app.test_client(), config.path, clock, bots
+
+
+def sign_up(client, token, secret, *, password="cooper-long-password", password2=None, code_=None):
+    return client.post(f"/setup/{token}", data={
+        "password": password, "password2": password2 or password,
+        "code": code_ or gw.totp(secret, int(time.time() // 30))})
+
+
+def test_an_invite_link_creates_the_login_and_logs_them_in(fresh):
+    client, path, clock, bots = fresh
+    token = invite(path)  # made at the server after the website started: no restart needed
+    stored = gw.GatewayConfig.load(path)
+    assert token not in path.read_text()                       # only a hash is kept
+    page = client.get(f"/setup/{token}")
+    assert page.status_code == 200 and b"Welcome, cooper" in page.data and b"<svg" in page.data
+    assert page.headers["Cache-Control"] == "no-store"
+    rv = sign_up(client, token, stored.invites["cooper"].totp_secret)
+    assert rv.status_code == 303 and rv.headers["Location"] == "/"
+    client.get("/api/rules")
+    assert bots.calls[-1][1] == "http://127.0.0.1:8771/api/rules"   # Cooper's own bot
+    after = gw.GatewayConfig.load(path)
+    assert "cooper" in after.users and not after.invites
+    assert "cooper-long-password" not in path.read_text()
+
+
+def test_the_link_works_once_and_expires(fresh):
+    client, path, clock, _ = fresh
+    token = invite(path, hours=1)
+    secret = gw.GatewayConfig.load(path).invites["cooper"].totp_secret
+    assert sign_up(client, token, secret).status_code == 303
+    assert client.get(f"/setup/{token}").status_code == 404
+    other = invite(path, name="sam", port=8773, hours=1)
+    clock[0] = time.time() + 3601
+    assert client.get(f"/setup/{other}").status_code == 404
+    assert client.get("/setup/made-up-token").status_code == 404
+
+
+@pytest.mark.parametrize("kwargs, fragment", [
+    ({"password": "short"}, b"at least 12"),
+    ({"password2": "something-else-entirely"}, b"match."),
+    ({"code_": "000000"}, b"That code doesn"),
+])
+def test_bad_sign_up_answers_are_refused_and_nothing_is_created(fresh, kwargs, fragment):
+    client, path, *_ = fresh
+    token = invite(path)
+    secret = gw.GatewayConfig.load(path).invites["cooper"].totp_secret
+    rv = sign_up(client, token, secret, **kwargs)
+    assert rv.status_code == 400 and fragment in rv.data
+    assert "cooper" not in gw.GatewayConfig.load(path).users
+
+
+def test_an_existing_login_cannot_be_invited_over(fresh):
+    _, path, *_ = fresh
+    with pytest.raises(SystemExit, match="already has a login"):
+        invite(path, name="nick", port=8772)
+
+
+def test_sign_up_guessing_is_throttled(fresh):
+    client, path, *_ = fresh
+    token = invite(path)
+    secret = gw.GatewayConfig.load(path).invites["cooper"].totp_secret
+    for _ in range(5):
+        sign_up(client, token, secret, code_="111111")
+    assert sign_up(client, token, secret).status_code == 429
