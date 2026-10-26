@@ -190,10 +190,42 @@ def test_dry_run_start_completes_and_populates_trade_log(client):
     assert trades["summary"]["total"] >= 1
 
 
-def test_live_start_blocked_without_confirm_phrase(client):
+def test_live_start_blocked_without_confirm_phrase(client, monkeypatch):
+    monkeypatch.setenv("LIVE_TRADING", "1")
     rv = client.post("/api/run/start", json={"live": True})
     assert rv.status_code == 409
-    assert "ENABLE LIVE TRADING" in rv.get_json()["error"]
+    assert "ENABLE LIVE TRADING" in rv.get_json()["error"]    # real money is switched off
+
+
+def _switch_on(client):
+    rv = client.post("/api/live/switch", json={"on": True, "confirm": "ENABLE LIVE TRADING"})
+    assert rv.status_code == 200 and rv.get_json()["live_armed"] is True
+
+
+def test_the_real_money_switch_needs_the_phrase_and_the_server_opt_in(client, monkeypatch):
+    monkeypatch.delenv("LIVE_TRADING", raising=False)
+    rv = client.post("/api/live/switch", json={"on": True, "confirm": "ENABLE LIVE TRADING"})
+    assert rv.status_code == 409 and "LIVE_TRADING=1" in rv.get_json()["error"]
+    monkeypatch.setenv("LIVE_TRADING", "1")
+    assert client.get("/api/mode").get_json()["mode"] == "DRY-RUN"    # allowed, but off
+    rv = client.post("/api/live/switch", json={"on": True, "confirm": "enable live"})
+    assert rv.status_code == 409 and client.get("/api/run/status").get_json()["live_switch_on"] is False
+    _switch_on(client)
+    assert client.get("/api/mode").get_json()["mode"] == "LIVE"
+    rv = client.post("/api/live/switch", json={"on": False})         # off: one click, no phrase
+    assert rv.status_code == 200 and rv.get_json()["live_switch_on"] is False
+    status = client.get("/api/run/status").get_json()
+    assert status["live_switch_on"] is False and status["live_armed"] is False
+    assert client.get("/api/mode").get_json()["mode"] == "DRY-RUN"
+
+
+def test_the_switch_alone_is_not_enough(client, monkeypatch):
+    monkeypatch.setenv("LIVE_TRADING", "1")
+    _switch_on(client)
+    monkeypatch.delenv("LIVE_TRADING")                                # removed on the server later
+    assert client.get("/api/mode").get_json()["mode"] == "DRY-RUN"
+    rv = client.post("/api/run/start", json={"live": True})
+    assert rv.status_code == 409 and "LIVE_TRADING" in rv.get_json()["error"]
 
 
 def test_live_start_blocked_without_env_optin(client, monkeypatch):
@@ -213,6 +245,7 @@ def test_status_lists_the_current_settings_in_plain_words(client, monkeypatch):
     assert "costs more than $1500" in summary["Per-pick cap"]
     assert "$300 for all open positions" in summary["Total budget"]
     # Live is still refused, now because there is no Schwab login in the test.
+    _switch_on(client)
     rv = client.post("/api/run/start", json={"live": True, "confirm": "ENABLE LIVE TRADING"})
     assert rv.status_code == 409 and "Schwab" in rv.get_json()["error"]
     assert client.get("/api/run/status").get_json()["status"] == "idle"
@@ -221,6 +254,7 @@ def test_status_lists_the_current_settings_in_plain_words(client, monkeypatch):
 def test_a_broken_rules_file_blocks_live_with_a_plain_message(client, paths, monkeypatch):
     monkeypatch.setenv("LIVE_TRADING", "1")
     open(paths.config_path, "a").write("\ntotal_budget: -5\n")
+    _switch_on(client)
     rv = client.post("/api/run/start", json={"live": True, "confirm": "ENABLE LIVE TRADING"})
     assert rv.status_code == 409 and "total_budget" in rv.get_json()["error"]
 

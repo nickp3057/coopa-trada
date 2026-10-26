@@ -48,7 +48,7 @@ def banner(mode: Mode) -> str:
         lines += [
             "   *** LIVE TRADING ENABLED ***",
             "   Real orders will be placed against a real account.",
-            "   (--live AND LIVE_TRADING=1 are both set.)",
+            "   (Live was asked for and LIVE_TRADING=1 is set.)",
         ]
     lines += [bar, ""]
     return "\n".join(lines)

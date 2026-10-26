@@ -179,6 +179,8 @@ def run_checks(target: str, app_path: Path | None) -> None:
             app.start()
             status, mode = call(app.port, "GET", "/api/mode")
             check(mode["live_env_enabled"], "the .env next to the app is loaded")
+            status, body = call(app.port, "POST", "/api/live/switch", {"on": True, "confirm": PHRASE})
+            check(status == 200 and body["live_armed"], "real money switched on with the typed phrase")
             status, body = live_start(app.port)
             check(status == 409 and "Schwab is not set up" in body["error"],
                   "live refused because Schwab is not set up")

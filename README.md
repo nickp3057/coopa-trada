@@ -107,8 +107,9 @@ anyone's sign-off. Older rules files with a `setting_confirmations` block still 
 the block is ignored and dropped on the next save.
 
 The day's run starts automatically at 7:00 AM MT on trading days (`auto_start_daily`,
-`auto_start_time`). It is a practice run unless the environment has both
-`LIVE_TRADING=1` and `AUTO_START_LIVE=1`.
+`auto_start_time`). It is a practice run unless the bot is allowed to trade
+real money (`LIVE_TRADING=1` in its `.env`) and the Dashboard's **Real money** switch is
+on (turning it on takes the typed phrase; off is one click).
 
 ## Running on a server
 

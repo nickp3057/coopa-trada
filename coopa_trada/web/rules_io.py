@@ -112,7 +112,7 @@ def _describe(key: str, values: dict) -> str:
         if not values.get("auto_start_daily", True):
             return "off: start the run by hand each day"
         return (f"automatic at {values.get('auto_start_time', '07:00')} MT on trading days "
-                "(practice unless AUTO_START_LIVE=1 and LIVE_TRADING=1 on the server)")
+                "(real orders only while the Dashboard's Real money switch is on)")
     if key == "exit_reference":
         ref = values.get("exit_reference_price", OPTIONAL_DEFAULTS["exit_reference_price"])
         return ("the mid (halfway between bid and ask) at purchase, so a wide spread is not an "

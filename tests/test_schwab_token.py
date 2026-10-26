@@ -322,6 +322,7 @@ def test_reconnect_refused_while_a_run_is_in_progress(client):
 
 def test_live_start_blocked_when_schwab_not_set_up(client, tmp_path, monkeypatch):
     monkeypatch.setenv("LIVE_TRADING", "1")
+    assert client.post("/api/live/switch", json={"on": True, "confirm": "ENABLE LIVE TRADING"}).status_code == 200
     rv = client.post("/api/run/start", json={"live": True, "confirm": "ENABLE LIVE TRADING"})
     assert rv.status_code == 409
     assert "Schwab is not set up" in rv.get_json()["error"]

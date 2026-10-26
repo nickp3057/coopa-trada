@@ -103,7 +103,7 @@ nano ~/coopa-data/cooper/.env
 | `ANTHROPIC_API_KEY` | your `coopa-trada` Claude key | same key |
 | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_CHAT_IDS` | **his** bot, his chat ID | a second bot of your own, or leave blank |
 | `NTFY_TOPIC` | his alert channel | yours |
-| `LIVE_TRADING`, `AUTO_START_LIVE` | `0` until the practice days look right | same |
+| `LIVE_TRADING` | `1` lets this bot trade real money at all; the everyday on/off is the Dashboard's **Real money** switch | same |
 
 Save with Ctrl-O, Enter, Ctrl-X, then restart that person's bot:
 

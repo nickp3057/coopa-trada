@@ -218,3 +218,6 @@ code { background: #eceef1; padding: 1px 4px; border-radius: 4px; font-size: 0.9
 .savebar[hidden] { display: none; }
 .row-tight { display: inline-flex; align-items: center; gap: 8px; }
 .btn-small { padding: 4px 12px; font-size: 13px; }
+.live-arm { margin: 10px 0; padding: 12px; border: 1px dashed var(--line); border-radius: 8px; }
+.live-arm input { width: 100%; max-width: 320px; margin: 6px 0; }
+#live-panel.is-armed { border-color: var(--danger); box-shadow: 0 0 0 2px rgba(179, 38, 30, 0.15); }

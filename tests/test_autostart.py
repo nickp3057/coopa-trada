@@ -30,7 +30,7 @@ class Runner:
 def paths(tmp_path):
     cfg = tmp_path / "rules.yaml"
     cfg.write_text(open("config/rules.example.yaml").read())
-    return SimpleNamespace(config_path=str(cfg))
+    return SimpleNamespace(config_path=str(cfg), db_path=str(tmp_path / "trada.db"))
 
 
 def test_starts_once_at_seven_mountain_on_a_trading_day(paths):
@@ -68,12 +68,15 @@ def test_app_restarted_mid_day_starts_the_run_again(paths):
     assert AutoStarter(paths, runner, env={}).check(mt(2026, 9, 2, 11, 30))
 
 
-@pytest.mark.parametrize("env, live", [
-    ({"LIVE_TRADING": "1", "AUTO_START_LIVE": "1"}, True),
-    ({"LIVE_TRADING": "1"}, False),
-    ({"AUTO_START_LIVE": "1"}, False),
+@pytest.mark.parametrize("env, switch, live", [
+    ({"LIVE_TRADING": "1"}, True, True),
+    ({"LIVE_TRADING": "1"}, False, False),                       # allowed, but switched off
+    ({"LIVE_TRADING": "1", "AUTO_START_LIVE": "1"}, False, False),  # the old setting alone does nothing
+    ({}, True, False),                                           # switched on, not allowed on the server
 ])
-def test_live_needs_both_opt_ins(paths, env, live):
+def test_live_needs_both_opt_ins(paths, env, switch, live):
+    from coopa_trada.live_switch import set_switch
+    set_switch(paths.db_path, switch)
     runner = Runner()
     AutoStarter(paths, runner, env=env).check(mt(2026, 9, 2, 8))
     assert runner.starts == [(live, "2026-09-02")]

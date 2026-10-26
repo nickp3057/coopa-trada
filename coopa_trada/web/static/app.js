@@ -48,7 +48,10 @@ async function refreshModePill() {
   if (!pill) return;
   const { ok, body } = await CT.get("/api/mode");
   if (!ok) return;
-  pill.textContent = "MODE = " + body.mode;
+  // LIVE while a live run is going, or (no run) when the next run will trade real money.
+  pill.textContent = body.mode !== "LIVE" ? "PRACTICE" : (body.running ? "LIVE RUN" : "REAL MONEY ON");
+  pill.title = body.mode !== "LIVE" ? "Runs are practice: nothing is sent to Schwab"
+    : "Runs place real orders (turn off on the Dashboard)";
   pill.classList.remove("mode-unknown", "mode-dry", "mode-live");
   pill.classList.add(body.mode === "LIVE" ? "mode-live" : "mode-dry");
 }

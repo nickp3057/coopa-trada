@@ -6,11 +6,11 @@ none is active and none was started today, so a run a person started or
 stopped earlier the same day is left alone. One attempt per day: a refused
 start is alerted like any other refused run and not retried.
 
-The automatic run is a practice (DRY-RUN) run unless the server environment
-has both ``LIVE_TRADING=1`` and ``AUTO_START_LIVE=1``. That second, separate
-opt-in replaces the typed confirmation phrase for unattended live trading; every
-other live check (today's date, Schwab login covering the hold, reconcile,
-locks) still runs inside ``Engine.run``.
+The automatic run is a practice (DRY-RUN) run unless the bot is allowed to
+trade real money (``LIVE_TRADING=1`` on the server) *and* the Dashboard's
+"Real money" switch is on (turned on with the typed confirmation phrase; see
+:mod:`coopa_trada.live_switch`). Every other live check (today's date, Schwab
+login covering the hold, reconcile, locks) still runs inside ``Engine.run``.
 """
 
 from __future__ import annotations
@@ -19,7 +19,6 @@ import os
 from datetime import date, datetime
 
 from . import clock
-from .config import _truthy
 from .logs import get_logger
 
 __all__ = ["AutoStarter"]
@@ -43,7 +42,8 @@ class AutoStarter:
         return self._cal
 
     def live(self) -> bool:
-        return _truthy(self.env.get("LIVE_TRADING")) and _truthy(self.env.get("AUTO_START_LIVE"))
+        from .live_switch import armed
+        return armed(self.paths.db_path, self.env)
 
     def check(self, now: datetime) -> bool:
         """Start today's run if it is due. Returns True when a run was started."""

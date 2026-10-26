@@ -19,13 +19,13 @@ On `claude/gracious-einstein-a30t1n`, one commit each (373 tests passing):
 
 - **Cooper confirmation checks removed** (`b45ef1d`). Settings are plain settings;
   the dashboard's live panel lists them in plain words. Live runs still need
-  `LIVE_TRADING=1`, the typed phrase (or `AUTO_START_LIVE=1`), a valid rules file
+  `LIVE_TRADING=1`, the Dashboard's Real money switch (on with the typed phrase), a valid rules file
   and a Schwab login covering the hold. Old `setting_confirmations` blocks are ignored.
 - **Spread fix** (`b66e116`): `exit_reference_price` (default `mid_at_entry`) makes
   the exit rules measure from the mid at purchase, so a wide bid–ask gap is not an
   instant loss. Price triggers count an exact hit (float tolerance).
 - **Automatic daily start** (`50f1c12`): 7:00 AM MT on trading days; practice unless
-  `LIVE_TRADING=1` and `AUTO_START_LIVE=1`; a run started or stopped by hand that day is
+  `LIVE_TRADING=1` and the Real money switch is on (replaced `AUTO_START_LIVE`); a run started or stopped by hand that day is
   left alone; one attempt per day.
 - **Server-ready** (`efcc10f`): `DASHBOARD_PASSWORD` (HTTP login, required off
   127.0.0.1), Tailscale-proxy-safe origin check, quiet keep-awake on Linux, calendar
@@ -179,7 +179,7 @@ run is accepted; the unknown-order test gets budget for both picks.
 2. `python -m coopa_trada readonly-check`; Telegram bot (docs/TELEGRAM_SETUP.md).
 3. A few practice days on real quotes (automatic start, Telegram confirm).
 4. Supervised live checks with one cheap contract (buy, sell, a forced reprice), then
-   `LIVE_TRADING=1` (and `AUTO_START_LIVE=1` for unattended days).
+   `LIVE_TRADING=1`, then the Dashboard's Real money switch.
 
 ## Validation
 

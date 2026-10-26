@@ -22,9 +22,9 @@ from .runner import EngineRunner, RunnerBusy
 
 bp = Blueprint("ui", __name__)
 
-# Typed into the guarded "enable live trading" control. Deliberately awkward to
-# fat-finger; it is only the *first* of the two live opt-ins -- LIVE_TRADING=1
-# in the environment is the second, and the UI never sets it.
+# Typed to turn the Dashboard's "Real money" switch on. Deliberately awkward to
+# fat-finger; LIVE_TRADING=1 in the bot's .env on the server is the other,
+# independent opt-in, and the UI never sets it.
 LIVE_CONFIRM_PHRASE = "ENABLE LIVE TRADING"
 
 
@@ -38,6 +38,15 @@ def _runner() -> EngineRunner:
 
 def _live_env_enabled() -> bool:
     return _truthy(os.environ.get("LIVE_TRADING"))
+
+
+def _switch_on() -> bool:
+    from ..live_switch import is_on
+    return is_on(_paths().db_path)
+
+
+def _armed() -> bool:
+    return _live_env_enabled() and _switch_on()
 
 
 # -- pages ------------------------------------------------------------------
@@ -107,6 +116,8 @@ def api_trades():
 def api_run_status():
     snap = _runner().snapshot()
     snap["live_env_enabled"] = _live_env_enabled()
+    snap["live_switch_on"] = _switch_on()
+    snap["live_armed"] = snap["live_env_enabled"] and snap["live_switch_on"]
     snap["live_confirm_phrase"] = LIVE_CONFIRM_PHRASE
     snap["keep_awake"] = current_app.config["COOPA_KEEPAWAKE"].status()
     snap.update(settings_summary(_paths().config_path))
@@ -123,7 +134,7 @@ def _live_checks(snap: dict) -> list[dict]:
     restart = ("restart this bot (server: sudo systemctl restart coopa-trada@YOURNAME; "
                "Mac: quit and reopen the app)")
     checks = [{"ok": bool(snap.get("live_env_enabled")),
-               "label": "Real trading is switched on for this bot (LIVE_TRADING=1)",
+               "label": "This bot is allowed to trade real money (LIVE_TRADING=1, set once on the server)",
                "fix": f"On the server, edit {env_path()} so it says LIVE_TRADING=1, then {restart}."}]
     keys = schwab_keys_status()
     checks.append({"ok": keys["api_key_set"] and keys["secret_set"],
@@ -149,9 +160,34 @@ def _live_checks(snap: dict) -> list[dict]:
                    "fix": f"Weekends, holidays and after the 2:00 PM MT close are closed. Next session opens {when}."})
     checks.append({"ok": snap.get("settings_error") is None, "label": "The settings file is valid",
                    "fix": snap.get("settings_error") or ""})
-    checks.append({"ok": snap.get("status") != "running", "label": "No run is going right now",
-                   "fix": "Press Stop on the practice run first (it stops watching; it sells nothing)."})
     return checks
+
+
+@bp.post("/api/live/switch")
+def api_live_switch():
+    """The Dashboard's "Real money" switch: on needs the phrase, off is one click."""
+    from ..live_switch import set_switch
+    body = request.get_json(silent=True) or {}
+    on = body.get("on") is True
+    runner = _runner()
+    running_live = runner.status == "running" and runner.mode == "LIVE"
+    if on:
+        if body.get("confirm") != LIVE_CONFIRM_PHRASE:
+            return jsonify(error=f'Type "{LIVE_CONFIRM_PHRASE}" to turn real money on.'), 409
+        if not _live_env_enabled():
+            return jsonify(error="This bot isn't allowed to trade real money yet: on the server, set "
+                                 "LIVE_TRADING=1 in its .env and restart it. The website can't do that."), 409
+        set_switch(_paths().db_path, True)
+        message = ("Real money is ON. The daily automatic run and the Start button now place real orders.")
+        if runner.status == "running" and not running_live:
+            message += " The practice run going now stays practice: press Stop, then Start, to trade for real today."
+    else:
+        set_switch(_paths().db_path, False)
+        message = "Real money is OFF. Runs from now on are practice only."
+        if running_live:
+            message += (" The live run going now keeps watching what it bought; press Stop to end it "
+                        "(Stop sells nothing).")
+    return jsonify(live_switch_on=_switch_on(), live_armed=_armed(), message=message)
 
 
 # -- Schwab app details (this bot's own .env) -------------------------------
@@ -181,11 +217,10 @@ def api_run_start():
     date_str = body.get("date") or None
 
     if live:
-        if body.get("confirm") != LIVE_CONFIRM_PHRASE:
-            return (
-                jsonify(error=f'type "{LIVE_CONFIRM_PHRASE}" to confirm a live run'),
-                409,
-            )
+        if not _switch_on():
+            note = "" if _live_env_enabled() else " This bot also needs LIVE_TRADING=1 in its .env on the server."
+            return (jsonify(error=f'Real money is off. Turn it on first by typing "{LIVE_CONFIRM_PHRASE}".{note}'),
+                    409)
         if not _live_env_enabled():
             return (
                 jsonify(
@@ -409,11 +444,18 @@ def api_alerts_test():
 # -- mode banner --------------------------------------------------
 @bp.get("/api/mode")
 def api_mode():
+    # What runs are doing now: the run going (if any), else what the next run will be.
     live_capable = _live_env_enabled()
-    mode = resolve_mode(live_capable)
+    runner = _runner()
+    if runner.status == "running":
+        mode = Mode(runner.mode)
+    else:
+        mode = resolve_mode(_switch_on(), {"LIVE_TRADING": "1" if live_capable else "0"})
     return jsonify(
         {
             "mode": mode.value,
+            "running": runner.status == "running",
+            "live_switch_on": _switch_on(),
             "live_env_enabled": live_capable,
             "banner": banner(mode),
         }

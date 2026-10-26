@@ -152,10 +152,10 @@ and 1 filled, the new order is for the 1 that's left.
 - Spend more than the budget, or more than the per-pick cap on one pick.
 - Use market orders.
 - Resend an order it is unsure about (it stops trading that option and asks a person).
-- Trade real money unless real trading is switched on in the server's `.env`
-  (`LIVE_TRADING=1`). Even then, a run only trades real money when someone starts a
-  live run and types the confirmation phrase, or when automatic live starts are also
-  switched on (`AUTO_START_LIVE=1`).
+- Trade real money unless the bot is allowed to in the server's `.env`
+  (`LIVE_TRADING=1`) **and** the Dashboard's **Real money** switch is on. The switch
+  starts off, turning it on takes the typed confirmation phrase, and turning it off is
+  one click. While it is on, the 7:00 AM automatic run and the Start button trade for real.
 
 ---
 

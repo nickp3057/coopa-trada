@@ -46,9 +46,9 @@
   </div>
   <p id="awake-status" class="status-line" hidden></p>
   <div class="row">
-    <button id="btn-start" class="btn btn-primary">Start today&rsquo;s run (dry&#8209;run)</button>
+    <button id="btn-start" class="btn btn-primary">Start today&rsquo;s practice run</button>
     <button id="btn-stop" class="btn" disabled>Stop</button>
-    <label class="inline">
+    <label class="inline" id="run-date-label">
       Date <input id="run-date" type="date" title="defaults to today (market tz)">
     </label>
   </div>
@@ -62,30 +62,33 @@
     1:40&ndash;1:55 PM Mountain), ideally before the market opens so positions held from
     yesterday are watched from the open. The run buys as soon as a list is confirmed here or
     in Telegram, inside the buying window shown in Settings. All times are Mountain.</p>
-  <p class="hint">The daily Start button always runs in DRY&#8209;RUN. Enabling live
-    trading is a separate, deliberately harder step below.</p>
+  <p class="hint" id="start-mode-hint">Real money is off, so every run is practice: nothing is sent
+    to Schwab.</p>
 </section>
 
 <section class="card danger" id="live-panel">
-  <h2>Enable live trading</h2>
-  <p class="hint">A live run places <strong>real orders</strong> in your Schwab account. It can
-    start only when every line below is ticked.</p>
+  <div class="scard-head">
+    <h2>Real money</h2>
+    <label class="switch"><input type="checkbox" id="live-switch" aria-describedby="live-switch-help"><span class="slider" aria-hidden="true"></span>
+      <span id="live-switch-label">Off</span></label>
+  </div>
+  <p class="hint" id="live-switch-help">Off: every run is practice and nothing is sent to Schwab. On: the
+    7:00 AM automatic run and the Start button place <strong>real orders</strong> in your Schwab
+    account. Turning it off is one click.</p>
+  <div id="live-arm" class="live-arm" hidden>
+    <label class="block" for="live-confirm">To turn real money on, type <strong id="live-phrase">ENABLE LIVE TRADING</strong></label>
+    <input id="live-confirm" type="text" autocomplete="off" spellcheck="false" autocapitalize="characters">
+    <div class="row">
+      <button id="btn-live-on" class="btn btn-danger" disabled>Turn real money on</button>
+      <button id="btn-live-cancel" class="btn" type="button">Cancel</button>
+    </div>
+  </div>
+  <p id="live-msg" class="msg" role="status"></p>
+  <h3>Real orders need</h3>
   <ul id="live-checks" class="checklist"><li class="hint">checking&hellip;</li></ul>
-  <p id="live-env" class="status-line" hidden></p>
   <details>
-    <summary>What a live run trades with</summary>
+    <summary>What a real run trades with</summary>
     <div id="live-settings" class="status-line">checking settings&hellip;</div>
-  </details>
-  <details>
-    <summary>Show the live&#8209;run control</summary>
-    <p class="hint">Real trading needs two separate switches: <code>LIVE_TRADING=1</code> in this
-      bot&rsquo;s settings file on the server (this page never sets it), and typing the phrase
-      below. The run is always for today.</p>
-    <label class="block">Type the confirmation phrase
-      <input id="live-confirm" type="text" autocomplete="off" placeholder="&hellip;">
-    </label>
-    <button id="btn-start-live" class="btn btn-danger" disabled>Start a LIVE run</button>
-    <p id="live-error" class="error"></p>
   </details>
 </section>
 

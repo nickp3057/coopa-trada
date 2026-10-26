@@ -72,10 +72,9 @@ def test_live_trading_cannot_be_switched_on_from_the_page(client):
 def test_live_checklist_says_what_is_missing(client):
     c, _ = client
     checks = {x["label"]: x for x in c.get("/api/run/status").get_json()["live_checks"]}
-    switch = checks["Real trading is switched on for this bot (LIVE_TRADING=1)"]
+    switch = checks["This bot is allowed to trade real money (LIVE_TRADING=1, set once on the server)"]
     assert switch["ok"] is False and "LIVE_TRADING=1" in switch["fix"]
     assert checks["Your Schwab app key and secret are saved"]["ok"] is False
-    assert checks["No run is going right now"]["ok"] is True
     c.post("/api/schwab/keys", json={"api_key": KEY, "app_secret": SECRET})
     checks = {x["label"]: x for x in c.get("/api/run/status").get_json()["live_checks"]}
     assert checks["Your Schwab app key and secret are saved"]["ok"] is True
