@@ -67,8 +67,8 @@ bash packaging/server/add-person.sh cooper 8771
 bash packaging/server/add-person.sh nick 8772
 ```
 
-**Or send a sign-up link** instead (the person picks their own password and sets up the
-6-digit codes on their phone, from anywhere):
+**Or send a sign-up link** instead (the person picks their own password and can set up
+6-digit codes on their phone, from anywhere; the codes are optional, and safer):
 
 ```bash
 bash packaging/server/add-person.sh cooper 8771 --invite
@@ -156,6 +156,9 @@ buys when its picks are confirmed, and sells by its own settings.
 | New website password | `.venv/bin/python -m coopa_trada.gateway --config ~/coopa-data/gateway.yaml reset-password cooper` then `sudo systemctl restart coopa-gateway` |
 | New phone for the 6-digit codes | same, with `reset-2fa cooper` |
 | Remove a person | `sudo systemctl disable --now coopa-trada@NAME`, then `remove-user NAME` |
+
+`add-person.sh NAME PORT --no-2fa` makes a password-only login; `remove-2fa NAME` turns the
+codes off for someone, `reset-2fa NAME` turns them on (both log that person out).
 
 Too many wrong tries locks a name for 15 minutes. A password or 2FA reset logs that
 person out everywhere.

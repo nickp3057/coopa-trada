@@ -3,8 +3,8 @@
 One server can run a separate copy of Coopa Trada per person (its own Schwab
 login, settings, trade log and Telegram bot; see docs/SERVER_SETUP.md). This
 small web app is the only thing the internet reaches (through Caddy, which adds
-HTTPS). It asks for a user name, a password and a 6-digit code from an
-authenticator app, then forwards that person, and only that person, to their
+HTTPS). It asks for a user name, a password and (for anyone who set them up)
+a 6-digit code from an authenticator app, then forwards that person, and only that person, to their
 own copy. Cooper logging in reaches Cooper's bot; Nick logging in reaches
 Nick's. Nothing in one copy can reach the other.
 
@@ -13,11 +13,12 @@ Nick's. Nothing in one copy can reach the other.
     python -m coopa_trada.gateway serve
 
 An invite is a one-time sign-up link (valid 24 hours by default) for a name
-and bot chosen at the server: the person opens it, picks a password and sets
-up the 6-digit codes in the browser. Only a hash of the link is stored.
+and bot chosen at the server: the person opens it, picks a password and can
+set up the 6-digit codes in the browser (optional). Only a hash of the link is stored.
 
 Security: passwords are stored as salted hashes (never the password); the
-6-digit codes are standard TOTP (RFC 6238), each usable once; 5 wrong tries for
+6-digit codes are standard TOTP (RFC 6238), each usable once (a person
+without codes, totp_secret "", logs in with the password alone); 5 wrong tries for
 a name or from one address lock it for 15 minutes; the session cookie is
 signed, HttpOnly, SameSite=Strict, Secure behind HTTPS, and lasts 12 hours.
 """
@@ -92,7 +93,7 @@ def otpauth_uri(name: str, secret: str) -> str:
 class User:
     name: str
     password_hash: str
-    totp_secret: str
+    totp_secret: str      # "" = this person chose no 6-digit codes
     backend: str
     session_version: int = 1
 
@@ -215,8 +216,8 @@ p.err{{color:var(--bad);margin:12px 0 0}}
 <h1>Coopa Trada</h1>
 <label for="u">Name</label><input id="u" name="username" autocomplete="username" autocapitalize="none" required value="{username}">
 <label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" required>
-<label for="c">6-digit code from your authenticator app</label>
-<input id="c" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{{6,7}}" required>
+<label for="c">6-digit code <span style="font-size:12px">(leave empty if you didn't set up codes)</span></label>
+<input id="c" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{{6,7}}">
 <input type="hidden" name="next" value="{next}">
 <button type="submit">Log in</button>{error}
 </form></body></html>"""
@@ -237,13 +238,16 @@ _SETUP_PAGE = _PAGE.split("<form")[0].replace("Log in</title>", "Sign up</title>
 <input id="p" name="password" type="password" autocomplete="new-password" required minlength="{min}">
 <label for="p2">Type it again</label>
 <input id="p2" name="password2" type="password" autocomplete="new-password" required minlength="{min}">
+<details style="margin-top:14px"><summary style="cursor:pointer">Also ask for a 6-digit code from my phone
+(optional, safer)</summary>
 <label>Install an authenticator app on your phone (Google Authenticator, Microsoft Authenticator,
 1Password&hellip;), tap +, and scan this:</label>
 <div style="background:#fff;padding:8px;border-radius:6px;width:max-content;margin:6px 0">{qr}</div>
 <p style="font-size:13px;color:var(--muted);word-break:break-all">On this phone? Tap
 <a href="{uri}">add to authenticator</a>, or choose "enter a setup key" and type: <b>{key}</b></p>
 <label for="c">Then type the 6-digit code the app shows</label>
-<input id="c" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{{6,7}}" required>
+<input id="c" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{{6,7}}">
+</details>
 <button type="submit">Create my login</button>{error}
 </form></body></html>"""
 
@@ -324,12 +328,15 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
             return page(name, "Too many wrong tries. Wait 15 minutes, then try again.", nxt, 429)
         user = cfg().users.get(name)
         password_ok = user is not None and check_password(user.password_hash, request.form.get("password", ""))
-        step = (verify_totp(user.totp_secret, request.form.get("code", ""), clock(),
-                            after_step=last_step.get(name, -1)) if password_ok else None)
-        if step is None:
+        step = None
+        if password_ok and user.totp_secret:
+            step = verify_totp(user.totp_secret, request.form.get("code", ""), clock(),
+                               after_step=last_step.get(name, -1))
+        if not password_ok or (user.totp_secret and step is None):
             throttle.fail(*keys)
             return page(name, "Wrong name, password or code.", nxt, 401)
-        last_step[name] = step
+        if step is not None:
+            last_step[name] = step
         throttle.clear(*keys)
         return start_session(redirect(nxt, 303), user)
 
@@ -372,8 +379,9 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
             return setup_page(invite, token, f"Choose a password of at least {MIN_PASSWORD} characters.", 400)
         if password != request.form.get("password2", ""):
             return setup_page(invite, token, "The two passwords don't match.", 400)
-        step = verify_totp(invite.totp_secret, request.form.get("code", ""), clock())
-        if step is None:
+        typed = request.form.get("code", "").strip()
+        step = verify_totp(invite.totp_secret, typed, clock()) if typed else None
+        if typed and step is None:
             throttle.fail(f"ip:{ip}")
             return setup_page(invite, token, "That code doesn't match. Check the app shows Coopa Trada, "
                                              "and that the phone's clock is set automatically.", 400)
@@ -381,11 +389,13 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
             current = GatewayConfig.load(config.path)
             if current.invite_for(token, clock()) is None or invite.name in current.users:
                 return make_response("This sign-up link is used up. Log in instead.", 409)
-            user = User(invite.name, hash_password(password), invite.totp_secret, invite.backend)
+            # No code typed: they chose no 6-digit codes (they can be added later with reset-2fa).
+            user = User(invite.name, hash_password(password), invite.totp_secret if typed else "", invite.backend)
             current.users[user.name] = user
             del current.invites[invite.name]
             current.save()
-        last_step[user.name] = step
+        if step is not None:
+            last_step[user.name] = step
         cfg()
         return start_session(redirect("/", 303), user)
 
@@ -471,12 +481,13 @@ def main(argv=None) -> int:
     add = sub.add_parser("add-user", help="add a person and the port of their bot")
     add.add_argument("name")
     add.add_argument("--port", type=int, required=True, help="the port of this person's bot, e.g. 8771")
+    add.add_argument("--no-2fa", action="store_true", help="password only, no 6-digit codes")
     inv = sub.add_parser("invite", help="make a one-time sign-up link for a person")
     inv.add_argument("name")
     inv.add_argument("--port", type=int, required=True, help="the port of this person's bot, e.g. 8771")
     inv.add_argument("--hours", type=float, default=24, help="how long the link works (default 24)")
     inv.add_argument("--site", help="the website address (default: from setup-https.sh)")
-    for cmd in ("reset-password", "reset-2fa", "remove-user"):
+    for cmd in ("reset-password", "reset-2fa", "remove-2fa", "remove-user"):
         sub.add_parser(cmd).add_argument("name")
     sub.add_parser("list")
     args = parser.parse_args(argv)
@@ -494,7 +505,7 @@ def main(argv=None) -> int:
     name = getattr(args, "name", "").strip().lower()
     if args.command == "list":
         for user in config.users.values():
-            print(f"{user.name}: bot at {user.backend}")
+            print(f"{user.name}: bot at {user.backend}, 6-digit codes {'on' if user.totp_secret else 'off'}")
         for invite in config.invites.values():
             state = "expired" if invite.expires < time.time() else "waiting"
             print(f"{invite.name}: sign-up link {state} (bot at {invite.backend})")
@@ -519,8 +530,10 @@ def main(argv=None) -> int:
             raise SystemExit("Use a simple name: letters, digits and _ only")
         if name in config.users:
             raise SystemExit(f"{name} already exists (use reset-password or reset-2fa)")
-        user = User(name, hash_password(_ask_password(name)), new_totp_secret(), f"http://127.0.0.1:{args.port}")
-        _enroll_2fa(user)
+        user = User(name, hash_password(_ask_password(name)), "" if args.no_2fa else new_totp_secret(),
+                    f"http://127.0.0.1:{args.port}")
+        if user.totp_secret:
+            _enroll_2fa(user)
         config.users[name] = user
     else:
         user = config.users.get(name)
@@ -530,6 +543,8 @@ def main(argv=None) -> int:
             del config.users[name]
         elif args.command == "reset-password":
             user.password_hash = hash_password(_ask_password(name))
+        elif args.command == "remove-2fa":
+            user.totp_secret = ""
         else:
             user.totp_secret = new_totp_secret()
             _enroll_2fa(user)

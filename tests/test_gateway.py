@@ -275,3 +275,38 @@ def test_sign_up_guessing_is_throttled(fresh):
     for _ in range(5):
         sign_up(client, token, secret, code_="111111")
     assert sign_up(client, token, secret).status_code == 429
+
+
+# -- 6-digit codes are optional per person ----------------------------------------------
+def test_signing_up_without_codes_makes_a_password_only_login(fresh):
+    client, path, *_ = fresh
+    token = invite(path)
+    assert b"optional" in client.get(f"/setup/{token}").data
+    rv = client.post(f"/setup/{token}", data={"password": "cooper-long-password",
+                                              "password2": "cooper-long-password", "code": ""})
+    assert rv.status_code == 303
+    assert gw.GatewayConfig.load(path).users["cooper"].totp_secret == ""
+    other = client.application.test_client()
+    assert other.post("/login", data={"username": "cooper", "password": "cooper-long-password",
+                                      "code": ""}).status_code == 303
+    assert other.post("/login", data={"username": "cooper", "password": "wrong-long-password",
+                                      "code": ""}).status_code == 401
+
+
+def test_a_person_with_codes_still_needs_one(fresh):
+    client, *_ = fresh
+    rv = client.post("/login", data={"username": "nick", "password": "nick-long-password", "code": ""})
+    assert rv.status_code == 401 and client.get("/api/rules").status_code == 401
+
+
+def test_codes_can_be_left_off_or_removed_at_the_server(tmp_path, monkeypatch):
+    path = tmp_path / "gateway.yaml"
+    monkeypatch.setattr(gw, "_ask_password", lambda name: f"{name}-long-password")
+    monkeypatch.setattr(gw, "_enroll_2fa", lambda user: None)
+    gw.main(["--config", str(path), "add-user", "cooper", "--port", "8771", "--no-2fa"])
+    gw.main(["--config", str(path), "add-user", "nick", "--port", "8772"])
+    users = gw.GatewayConfig.load(path).users
+    assert users["cooper"].totp_secret == "" and users["nick"].totp_secret
+    gw.main(["--config", str(path), "remove-2fa", "nick"])
+    nick = gw.GatewayConfig.load(path).users["nick"]
+    assert nick.totp_secret == "" and nick.session_version == 2
