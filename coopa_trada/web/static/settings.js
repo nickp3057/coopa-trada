@@ -6,6 +6,14 @@
 const form = document.getElementById("rules-form");
 const msg = document.getElementById("rules-msg");
 const dirty = document.getElementById("dirty");
+const savebar = document.getElementById("savebar");
+let hideTimer = null;
+
+// The save bar only shows while there is something to save (or a save just happened).
+function showSavebar(on) {
+  clearTimeout(hideTimer);
+  savebar.hidden = !on;
+}
 const pathEl = document.getElementById("rules-path");
 const fileWarn = document.getElementById("rules-file-warning");
 const noteEl = document.getElementById("ambiguous-note");
@@ -101,6 +109,7 @@ function fill(data) {
   renderExitWindow(data.exit_window || {});
   updateHints();
   dirty.hidden = true;
+  showSavebar(false);
 }
 
 function collect() {
@@ -138,7 +147,7 @@ async function load() {
   else { msg.textContent = "Could not load the settings."; msg.className = "msg is-error"; }
 }
 
-form.addEventListener("input", () => { dirty.hidden = false; msg.textContent = ""; updateHints(); });
+form.addEventListener("input", () => { dirty.hidden = false; msg.textContent = ""; showSavebar(true); updateHints(); });
 form.addEventListener("submit", async (ev) => {
   ev.preventDefault();
   msg.textContent = "Saving…";
@@ -148,6 +157,8 @@ form.addEventListener("submit", async (ev) => {
     fill(body);
     msg.textContent = "Saved.";
     msg.className = "msg ok";
+    showSavebar(true);
+    hideTimer = setTimeout(() => { savebar.hidden = true; }, 2000);
   } else {
     msg.textContent = body.error || "Not saved.";
     msg.className = "msg is-error";
@@ -161,9 +172,21 @@ load();
 const keysForm = document.getElementById("keys-form");
 const keysMsg = document.getElementById("keys-msg");
 
-function renderKeys(k) {
+// Once the App Key and Secret are saved the card folds down to one line; "Change" opens it again.
+function showKeysForm(open) {
+  document.getElementById("keys-body").hidden = !open;
+  document.getElementById("keys-summary").hidden = open;
+  document.getElementById("btn-keys-edit").textContent = open ? "Close" : "Change";
+}
+
+function renderKeys(k, keepOpen) {
   const state = document.getElementById("keys-state");
   const ready = k.api_key_set && k.secret_set;
+  document.getElementById("btn-keys-edit").hidden = !ready;
+  document.getElementById("keys-summary").textContent = ready
+    ? "App Key " + k.api_key_hint + (k.account_id_set ? " · account " + k.account_hint : "") + " · callback " + k.callback_url
+    : "";
+  showKeysForm(!ready || !!keepOpen);
   state.textContent = ready ? "Saved" : "Not set up";
   state.className = "pill " + (ready ? "pill-ok" : "pill-warn");
   keysForm.elements.api_key.value = "";
@@ -187,13 +210,18 @@ keysForm.addEventListener("submit", async (ev) => {
   const data = Object.fromEntries(new FormData(keysForm).entries());
   const { ok, body } = await CT.post("/api/schwab/keys", data);
   if (ok) {
-    renderKeys(body);
+    renderKeys(body, true);
     keysMsg.textContent = body.message;
     keysMsg.className = "msg ok";
   } else {
     keysMsg.textContent = body.error || "Not saved.";
     keysMsg.className = "msg is-error";
   }
+});
+document.getElementById("btn-keys-edit").addEventListener("click", () => {
+  const open = document.getElementById("keys-body").hidden;
+  showKeysForm(open);
+  keysMsg.textContent = "";
 });
 loadKeys();
 

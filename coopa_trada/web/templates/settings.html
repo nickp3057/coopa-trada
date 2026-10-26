@@ -16,8 +16,13 @@
 <section class="card scard" id="s-schwab">
   <div class="scard-head">
     <h2>Your Schwab app</h2>
-    <span id="keys-state" class="pill">checking&hellip;</span>
+    <span class="row-tight">
+      <span id="keys-state" class="pill">checking&hellip;</span>
+      <button type="button" id="btn-keys-edit" class="btn btn-small" hidden>Change</button>
+    </span>
   </div>
+  <p class="help" id="keys-summary" hidden></p>
+  <div id="keys-body">
   <p class="hint">From your app on <strong>developer.schwab.com</strong> (Dashboard &rarr; View Details).
     Saved to your bot only. The Secret is never shown again; leave a box empty to keep what&rsquo;s saved.</p>
   <form id="keys-form" class="grid2" autocomplete="off">
@@ -44,6 +49,7 @@
       <span id="keys-msg" class="msg" role="status"></span>
     </div>
   </form>
+  </div>
 </section>
 
 <form id="rules-form" novalidate>
@@ -228,7 +234,7 @@
     </details>
   </section>
 
-  <div class="savebar" role="region" aria-label="Save settings">
+  <div class="savebar" id="savebar" role="region" hidden aria-label="Save settings">
     <span id="dirty" class="dirty" hidden>Unsaved changes</span>
     <span id="rules-msg" class="msg" role="status"></span>
     <button type="button" id="btn-reload" class="btn">Discard</button>
