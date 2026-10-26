@@ -62,6 +62,7 @@ class EngineRunner:
         self.last_finished: str | None = None
         self.last_error: str | None = None
         self.last_result: str | None = None
+        self.last_date: str | None = None  # the date the current/last run was started for
 
     # -- introspection ------------------------------------------------
     def snapshot(self) -> dict:
@@ -88,6 +89,7 @@ class EngineRunner:
             self.last_finished = None
             self.last_error = None
             self.last_result = None
+            self.last_date = date_str
             self._thread = threading.Thread(
                 target=self._run, args=(bool(live), date_str, replace(self._paths)), daemon=True
             )
@@ -103,6 +105,22 @@ class EngineRunner:
 
     def stop(self) -> None:
         self._stop.set()
+
+    def restart(self, *, live: bool, timeout: float = 60.0) -> None:
+        """Stop the run going now and start it again (it re-reads the settings).
+
+        A restarted run picks up where the last one left off: what is held stays
+        held and is watched, and a pick already bought today is not bought again.
+        """
+        thread = self._thread
+        if self.status != "running" or thread is None:
+            raise RunnerBusy("no run is going")
+        date_str = self.last_date
+        self.stop()
+        thread.join(timeout)
+        if thread.is_alive():
+            raise RunnerBusy("the run is still finishing its last step; try again in a minute")
+        self.start(live=live, date_str=date_str)
 
     # -- worker ---------------------------------------------------
     def _sleep(self, seconds: float) -> None:

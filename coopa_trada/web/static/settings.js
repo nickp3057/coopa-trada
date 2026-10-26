@@ -13,6 +13,7 @@ let hideTimer = null;
 function showSavebar(on) {
   clearTimeout(hideTimer);
   savebar.hidden = !on;
+  if (!on) document.getElementById("btn-restart-run").hidden = true;
 }
 const pathEl = document.getElementById("rules-path");
 const fileWarn = document.getElementById("rules-file-warning");
@@ -155,16 +156,41 @@ form.addEventListener("submit", async (ev) => {
   const { ok, body } = await CT.post("/api/rules", collect());
   if (ok) {
     fill(body);
-    msg.textContent = "Saved.";
-    msg.className = "msg ok";
     showSavebar(true);
-    hideTimer = setTimeout(() => { savebar.hidden = true; }, 2000);
+    if (body.run_going) {
+      // The run going now keeps the settings it started with until it is restarted.
+      msg.textContent = "Saved. The run going now still uses the old settings.";
+      msg.className = "msg warn";
+      restartBtn.hidden = false;
+    } else {
+      msg.textContent = "Saved.";
+      msg.className = "msg ok";
+      hideTimer = setTimeout(() => { savebar.hidden = true; }, 2000);
+    }
   } else {
     msg.textContent = body.error || "Not saved.";
     msg.className = "msg is-error";
   }
 });
 document.getElementById("btn-reload").addEventListener("click", load);
+
+const restartBtn = document.getElementById("btn-restart-run");
+restartBtn.addEventListener("click", async () => {
+  restartBtn.disabled = true;
+  msg.textContent = "Restarting the run…";
+  msg.className = "msg";
+  const { ok, body } = await CT.post("/api/run/restart", {});
+  restartBtn.disabled = false;
+  if (ok) {
+    restartBtn.hidden = true;
+    msg.textContent = "The run restarted with these settings.";
+    msg.className = "msg ok";
+    hideTimer = setTimeout(() => { savebar.hidden = true; }, 3000);
+  } else {
+    msg.textContent = body.error || "Could not restart the run.";
+    msg.className = "msg is-error";
+  }
+});
 window.addEventListener("beforeunload", (ev) => { if (!dirty.hidden) ev.preventDefault(); });
 load();
 

@@ -3,8 +3,8 @@
 {% block content %}
 <div class="page-head">
   <h1>Settings</h1>
-  <p class="hint">Your own bot&rsquo;s settings. Changes apply from the next check (within a minute) and
-    never touch anyone else&rsquo;s bot. All times are Mountain (MT).</p>
+  <p class="hint">Your own bot&rsquo;s settings. A run uses the settings it started with: after saving,
+    restart a run that&rsquo;s going (you&rsquo;ll get a button). Changes never touch anyone else&rsquo;s bot. All times are Mountain (MT).</p>
   <nav class="chips" aria-label="Sections">
     <a href="#s-schwab">Schwab app</a><a href="#s-schedule">Schedule</a><a href="#s-buying">Buying</a>
     <a href="#s-selling">Selling</a><a href="#s-unfilled">Unfilled sells</a><a href="#s-advanced">Advanced</a>
@@ -237,6 +237,7 @@
   <div class="savebar" id="savebar" role="region" hidden aria-label="Save settings">
     <span id="dirty" class="dirty" hidden>Unsaved changes</span>
     <span id="rules-msg" class="msg" role="status"></span>
+    <button type="button" id="btn-restart-run" class="btn btn-primary" hidden>Restart the run with these</button>
     <button type="button" id="btn-reload" class="btn">Discard</button>
     <button type="submit" class="btn btn-primary">Save settings</button>
   </div>

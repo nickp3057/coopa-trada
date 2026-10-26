@@ -85,7 +85,8 @@ def api_rules_post():
         updated = write_rules(_paths().config_path, payload)
     except RulesValidationError as exc:
         return jsonify(error=str(exc)), 400
-    return jsonify(updated)
+    # A run reads the settings when it starts: say so, so a change isn't silently ignored.
+    return jsonify(**updated, run_going=_runner().status == "running")
 
 
 # -- trade log --------------------------------------------------------
@@ -247,6 +248,23 @@ def api_run_start():
     except RunnerBusy as exc:
         return jsonify(error=str(exc)), 409
     return jsonify(_runner().snapshot()), 202
+
+
+@bp.post("/api/run/restart")
+def api_run_restart():
+    """Stop and start the run going now, so it uses the saved settings. Same mode
+    as before, except that it is practice if Real money was switched off since."""
+    runner = _runner()
+    live = runner.mode == "LIVE" and _armed()
+    if not live:
+        summary = settings_summary(_paths().config_path)
+        if summary["settings_error"]:
+            return jsonify(error=summary["settings_error"]), 409
+    try:
+        runner.restart(live=live)
+    except RunnerBusy as exc:
+        return jsonify(error=str(exc)), 409
+    return jsonify(runner.snapshot()), 202
 
 
 @bp.post("/api/run/stop")

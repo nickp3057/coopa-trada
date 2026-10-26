@@ -312,3 +312,49 @@ def test_signals_picker_accepts_valid_csv(client, paths):
 def test_signals_picker_rejects_missing_file(client):
     rv = client.post("/api/signals", json={"path": "/nope/does-not-exist.csv"})
     assert rv.status_code == 400
+
+
+# -- settings saved during a run ------------------------------------------
+def test_saving_settings_during_a_run_offers_a_restart_that_uses_them(client, paths, monkeypatch):
+    import coopa_trada.web.runner as runner_mod
+    from coopa_trada.rules import load_rules
+
+    budgets = []
+
+    def build(**kwargs):
+        budgets.append(load_rules(kwargs["config_path"]).total_budget)  # what this run trades with
+
+        class _Run:
+            def run(self, *a, **k):
+                while True:
+                    kwargs["sleep"](0.05)  # wakes and unwinds on Stop
+
+        class _Store:
+            def close(self):
+                pass
+
+        return _Run(), _Store()
+
+    monkeypatch.setattr(runner_mod, "build_engine", build)
+    rules = client.get("/api/rules").get_json()
+    assert client.post("/api/rules", json=rules).get_json()["run_going"] is False
+    assert client.post("/api/run/restart", json={}).status_code == 409     # nothing to restart
+    assert client.post("/api/run/start", json={"date": "2026-09-02"}).status_code == 202
+    _wait_for(lambda: len(budgets) == 1)                                     # the run has read its settings
+    rv = client.post("/api/rules", json={**rules, "total_budget": 5000})
+    assert rv.status_code == 200 and rv.get_json()["run_going"] is True
+    rv = client.post("/api/run/restart", json={})
+    assert rv.status_code == 202 and rv.get_json()["status"] == "running"
+    _wait_for(lambda: len(budgets) == 2)
+    assert budgets == [300, 5000]
+    status = client.get("/api/run/status").get_json()
+    assert status["status"] == "running" and status["mode"] == "DRY-RUN"
+    client.post("/api/run/stop", json={})
+
+
+def _wait_for(condition, seconds=5.0):
+    import time as _t
+    end = _t.monotonic() + seconds
+    while not condition():
+        assert _t.monotonic() < end, "timed out"
+        _t.sleep(0.01)
