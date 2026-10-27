@@ -190,7 +190,8 @@
         });
       });
       table.replaceChildren(t);
-      message.textContent = `${body.rows.length} picks for ${body.date}, expiring ${body.expiration}. Confirm only after checking the original. Last prices are reference prices; orders use fresh quotes.`;
+      message.textContent = `${body.rows.length} picks for ${body.date}, expiring ${body.expiration}. Confirm only after checking the original. Last prices are reference prices; orders use fresh quotes.` +
+        (body.notes && body.notes.length ? " " + body.notes.join(" ") : "");
       confirm.disabled = false;
     } catch (error) { message.textContent = error.message; }
     finally { preview.disabled = false; }

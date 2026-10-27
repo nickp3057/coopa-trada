@@ -22,3 +22,6 @@ dist/
 
 # Reviewed uploads
 imports/
+
+# tickers a bot learned from pick lists
+config/asset_classes.learned.yaml

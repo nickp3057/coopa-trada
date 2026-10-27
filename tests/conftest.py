@@ -9,6 +9,8 @@ REAL_SPAWN = _keepawake._spawn  # kept for the one test that checks its argument
 def _isolated_lock_dir(tmp_path, monkeypatch):
     """Account locks go to a per-test folder, never the real ~/.coopa_trada."""
     monkeypatch.setenv("COOPA_TRADA_LOCK_DIR", str(tmp_path / "locks"))
+    # Learned tickers go to a per-test file, never the repo's config folder.
+    monkeypatch.setenv("COOPA_TRADA_LEARNED_TICKERS", str(tmp_path / "learned-tickers.yaml"))
 
 
 class FakeCaffeinate:

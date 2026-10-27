@@ -185,7 +185,7 @@ def cells_to_csv(cells: list[dict]) -> str:
     return out.getvalue()
 
 
-def preview_csv(text: str, trading_date: str, expiration_date: str) -> dict:
+def preview_csv(text: str, trading_date: str, expiration_date: str, *, ticker_lookup=None) -> dict:
     day, expiration = date.fromisoformat(trading_date), date.fromisoformat(expiration_date)
     if expiration < day:
         raise ValueError("Expiration must be on or after the trading date")
@@ -201,6 +201,16 @@ def preview_csv(text: str, trading_date: str, expiration_date: str) -> dict:
         raise ValueError("Provide between 1 and 100 picks")
     if any(len(r) != width for r in rows):
         raise ValueError("Each pick must have the same number of columns as the header")
+    header = [c.strip().upper() for c in table[0]]
+    sym_i, opt_i = header.index("SYMBOL"), header.index("OPTION")
+    bad = [f"{r[sym_i].strip() or '?'} {r[opt_i].strip() or '?'}" for r in rows
+           if not re.fullmatch(r"\d+\.?\d*[CP]", r[opt_i].strip(), re.IGNORECASE)]
+    if bad:
+        raise ValueError(f"These options don't read right: {', '.join(bad)}. Each one should look like "
+                         "43C or 49.5P (strike, then C or P). Fix them in the table.")
+    # New tickers are looked up at Schwab (stock or ETF) and remembered.
+    from .tickers import learn_tickers
+    notes = learn_tickers([r[sym_i] for r in rows], **({} if ticker_lookup is None else {"lookup": ticker_lookup}))
     canonical = f"Trade date: {day}; Expiration: {expiration}\n" + "\n".join(lines[start:]) + "\n"
     with tempfile.TemporaryDirectory(prefix="coopa-preview-") as tmp:
         path = Path(tmp) / "picks.csv"
@@ -213,6 +223,7 @@ def preview_csv(text: str, trading_date: str, expiration_date: str) -> dict:
     if any(s.reference_price is None or s.reference_price <= 0 for s in signals):
         raise ValueError("Every pick needs a positive LAST PRICE")
     return {
+        "notes": notes,
         "csv": canonical, "date": str(day), "expiration": str(expiration),
         "rows": [{"symbol": s.underlying, "option": f"{s.strike:g}{s.right.value[0]}",
                   "last_price": s.reference_price, "tvt_delta": s.signal_delta_tvt,

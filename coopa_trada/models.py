@@ -248,6 +248,10 @@ class CsvSignalSource(SignalSource):
     def fetch(self, day: date | None = None) -> list[Signal]:
         text = self.path.read_text(encoding="utf-8")
         ac_map = load_asset_class_map(_find_config(self.asset_classes_path))
+        if self.asset_classes_path == Path(DEFAULT_ASSET_CLASSES_PATH):
+            # Plus the tickers this bot learned from earlier lists (the shipped list wins).
+            from .tickers import known_classes
+            ac_map = {**known_classes(), **ac_map}
 
         ref = day or clock.to_market(clock.now_utc()).date()
         list_date, expiration = self._parse_header(text, ref)
