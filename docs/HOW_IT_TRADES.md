@@ -164,6 +164,7 @@ and 1 filled, the new order is for the 1 that's left.
 | Setting | Default | Other choices |
 |---|---|---|
 | Start the day's run automatically | on, 7:00 AM MT | off, or another time |
+| Practice runs use real Schwab prices | off (made-up prices that always drift down) | on (real prices, pretend orders; needs the Schwab login) |
 | Earliest buy | 30 min before the close (1:30 PM MT) | any number of minutes |
 | No new buys after | 3 min before the close (1:57 PM MT) | any number of minutes |
 | Rank picks by | Schwab's live delta | TVT delta from the screenshot |

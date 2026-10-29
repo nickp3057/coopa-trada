@@ -1,6 +1,6 @@
 # Project state — Coopa Trada
 
-_Last updated: 2026-10-26_
+_Last updated: 2026-10-29_
 
 Python/Flask app that trades Cooper's daily FOMC option picks through Schwab. It runs
 as a double-click macOS app or as a service on a Linux server
@@ -13,7 +13,29 @@ placed**. The only real Schwab request so far is still Nick's login (2026-10-16)
 The plain-English rulebook, with dollar examples and every setting, is
 **`docs/HOW_IT_TRADES.md`**.
 
-## Session summary (2026-10-25)
+## Session summary (2026-10-29): merge, practice on real prices
+
+- **Everything merged into `master`**: the cloud branch `claude/gracious-einstein-a30t1n`
+  plus the local server-readiness branches (tasks 1–4). The cloud branch had its own
+  auto-start (`autostart.py`, Settings) and per-person server pack
+  (`packaging/server/`, `docs/SERVER_SETUP.md`), so task 1's `AUTO_START*` env
+  auto-start and task 3's `deploy/` + `docs/AWS_SETUP.md` were dropped (still in git
+  history on `task-4-rehearsal`). Kept: the end-of-day summary (`scheduler.py` now does
+  only that) and `python -m coopa_trada rehearse`.
+- **Why practice P&L was all losses** (trade log of Oct 26–27, −$1,713): practice used
+  `SyntheticQuoteSource`, which drops every price 1% per check. On Oct 27 the bot
+  ticked those fake prices from its 7:00 AM start until the open, so all 8 held
+  options read $0.01 at 7:30 and the trailing stop sold them. Not a strategy result.
+- **New setting `practice_real_prices`** (Settings → "Practice runs use real Schwab
+  prices", default off): real chains and quotes (`ContractResolver`,
+  `SchwabQuoteSource`) with `DryRunBroker` pretend fills; needs the Schwab login.
+- **Exit loop survives bad quotes**: an invalid quote or quote error used to raise
+  out of `_exit_tick` and stop the whole run (live too). Now that position is skipped
+  for the tick; 5 failures in a row alert ("No price for an open position").
+- `packaging/verify_app.py` switches auto-start off in its scratch folder (it failed
+  during market hours because the automatic start had already begun a run).
+
+
 
 On `claude/gracious-einstein-a30t1n`, one commit each (373 tests passing):
 
@@ -182,7 +204,8 @@ run is accepted; the unknown-order test gets budget for both picks.
 
 1. Set up the server (docs/SERVER_SETUP.md) or keep the Mac; fill in `.env`.
 2. `python -m coopa_trada readonly-check`; Telegram bot (docs/TELEGRAM_SETUP.md).
-3. A few practice days on real quotes (automatic start, Telegram confirm).
+3. Turn on Settings → "Practice runs use real Schwab prices", then a few practice
+   days (automatic start, Telegram confirm). Their P&L is the first meaningful one.
 4. Supervised live checks with one cheap contract (buy, sell, a forced reprice), then
    `LIVE_TRADING=1`, then the Dashboard's Real money switch.
 

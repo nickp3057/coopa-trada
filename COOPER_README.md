@@ -4,7 +4,9 @@ This guide needs no Terminal or command-line skills. Everything happens in Finde
 and in a web page the app opens for you.
 
 **Safety first.** The app starts in **practice mode** (shown as **DRY‑RUN**). In
-practice mode it uses made-up prices and never sends anything to Schwab. Real trading
+practice mode it never sends anything to Schwab. Its prices are made up unless
+**Settings → Practice runs use real Schwab prices** is on; turn that on to see how the
+picks would really have done (it needs the Schwab login). Real trading
 stays switched off until Nick turns it on with you, and even then the app asks you
 to type a confirmation phrase every time.
 

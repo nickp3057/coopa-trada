@@ -20,6 +20,12 @@ no_new_buys_minutes_before_close: 3
 auto_start_daily: true
 auto_start_time: "07:00"
 
+# Practice (DRY-RUN) runs: true = real Schwab option prices with pretend orders
+# (nothing is sent to Schwab; needs the Schwab login). false = made-up prices
+# that drift down 1% every check, for testing the app only: their P&L is
+# always a loss and says nothing about the picks.
+practice_real_prices: false
+
 # Exit-management window, per asset class. Each endpoint is either:
 #   - "HH:MM"  -> a wall-clock time in America/New_York on the session date
 #                 (on half days it moves earlier by as much as the close does), or

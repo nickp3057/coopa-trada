@@ -14,6 +14,7 @@ from flask import Blueprint, current_app, jsonify, render_template, request
 from ..config import Mode, credentials_from_env, resolve_mode, _truthy
 from ..logs import banner
 from ..models import CsvSignalSource
+from ..rules import load_rules
 from ..store import Store
 from ..wiring import TokenMissing, build_engine, token_status
 from .config import WebPaths
@@ -214,6 +215,13 @@ def api_schwab_keys_save():
                                    "on the Dashboard so the login uses them.")
 
 
+def _practice_real_prices() -> bool:
+    try:
+        return load_rules(_paths().config_path).practice_real_prices
+    except (ValueError, TypeError, OSError):
+        return False  # the run itself reports a broken rules file
+
+
 @bp.post("/api/run/start")
 def api_run_start():
     body = request.get_json(silent=True) or {}
@@ -240,6 +248,7 @@ def api_run_start():
         summary = settings_summary(_paths().config_path)
         if summary["settings_error"]:
             return jsonify(error=summary["settings_error"]), 409
+    if live or _practice_real_prices():
         token = token_status(config_path=_paths().config_path)
         if token["state"] in ("not_set_up", "expired"):
             return jsonify(error=f'Schwab is {token["label"].lower()}. {token["message"]}'), 409

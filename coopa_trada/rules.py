@@ -126,6 +126,10 @@ class Rules:
     contracts_per_pick: int = 1
     auto_start_daily: bool = True
     auto_start_time: time = time(7, 0)
+    # Practice runs: true = real Schwab prices (option chains and quotes; orders
+    # are still only simulated, and a Schwab login is needed). false = made-up
+    # prices that drift down 1% per check (for testing the app, not the picks).
+    practice_real_prices: bool = False
     earliest_buy_minutes_before_close: int = 30
     no_new_buys_minutes_before_close: int = 3
     exit_reprice_after_seconds: int = 60
@@ -305,6 +309,10 @@ def load_rules(path: str | Path) -> Rules:
     except (ValueError, TypeError):
         raise ValueError('auto_start_time must be a Mountain-time HH:MM, for example "07:00"') from None
 
+    real_prices = data.get("practice_real_prices", False)
+    if type(real_prices) is not bool:
+        raise ValueError("practice_real_prices must be true or false")
+
     time_exit = data.get("next_day_time_exit", True)
     if type(time_exit) is not bool:
         raise ValueError("next_day_time_exit must be true or false")
@@ -317,6 +325,7 @@ def load_rules(path: str | Path) -> Rules:
         contracts_per_pick=per_pick,
         auto_start_daily=auto_daily,
         auto_start_time=auto_time,
+        practice_real_prices=real_prices,
         exit_reference_price=reference,
         exit_reprice_after_seconds=reprice_after,
         exit_reprice_max_attempts=reprice_max,

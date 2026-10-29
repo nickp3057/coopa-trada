@@ -91,7 +91,9 @@ def build_engine(
     ``mode`` decides the whole dependency graph:
 
     * ``Mode.DRY_RUN`` -> ``SyntheticResolver`` + ``DryRunBroker`` +
-      ``SyntheticQuoteSource``; no network, no token.
+      ``SyntheticQuoteSource``; no network, no token. With the
+      ``practice_real_prices`` setting, ``ContractResolver`` + ``SchwabQuoteSource``
+      instead (real prices, a token needed) and still ``DryRunBroker``.
     * ``Mode.LIVE``    -> real ``schwab-py`` client behind ``ContractResolver`` /
       ``SchwabBroker`` / ``SchwabQuoteSource``, all rate-limited.
 
@@ -119,6 +121,17 @@ def build_engine(
         broker = SchwabBroker(client, acct_hash, store, rl)
         resolver = ContractResolver(client, rl)
         quote_source = SchwabQuoteSource(client, rl)
+    elif rules.practice_real_prices:
+        # Real chains and quotes, simulated orders: DryRunBroker never calls Schwab.
+        from .broker import DryRunBroker, SchwabQuoteSource
+        from .contracts import ContractResolver
+        from .ratelimit import RateLimiter
+
+        client, creds = schwab_client()
+        rl = RateLimiter(120)
+        resolver = ContractResolver(client, rl)
+        quote_source = SchwabQuoteSource(client, rl)
+        broker = DryRunBroker(store, quote_source)
     else:
         from .broker import DryRunBroker
         from .contracts import SyntheticResolver
@@ -130,7 +143,7 @@ def build_engine(
     extra: dict = {}
     if now is not None:
         extra["now"] = now
-    if mode is Mode.LIVE:
+    if mode is Mode.LIVE or rules.practice_real_prices:
         extra["token_status"] = partial(read_token_status, creds.token_path)
     if sleep is not None:
         extra["sleep"] = sleep

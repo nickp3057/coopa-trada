@@ -48,6 +48,7 @@ OPTIONAL_DEFAULTS = {
     "no_new_buys_minutes_before_close": 3,
     "exit_reference_price": "mid_at_entry",
     "auto_start_daily": True,
+    "practice_real_prices": False,
     "next_day_time_exit": True,
     "contracts_per_pick": 1,
     "auto_start_time": "07:00",
@@ -113,6 +114,10 @@ def _describe(key: str, values: dict) -> str:
             return "off: start the run by hand each day"
         return (f"automatic at {values.get('auto_start_time', '07:00')} MT on trading days "
                 "(real orders only while the Dashboard's Real money switch is on)")
+    if key == "practice_prices":
+        if values.get("practice_real_prices", False):
+            return "real Schwab prices (orders are only simulated; needs the Schwab login)"
+        return "made-up prices that drift down 1% per check (tests the app, not the picks)"
     if key == "exit_reference":
         ref = values.get("exit_reference_price", OPTIONAL_DEFAULTS["exit_reference_price"])
         return ("the mid (halfway between bid and ask) at purchase, so a wide spread is not an "
@@ -173,6 +178,7 @@ def _mt_before_close(minutes) -> str:
 
 LABELS = {
     "auto_start": "Daily start",
+    "practice_prices": "Practice prices",
     "buy_window": "Buying window",
     "delta_ranking": "Order of buying",
     "total_budget": "Total budget",
@@ -264,7 +270,7 @@ def _coerce_payload(payload: dict) -> dict:
             out[name] = int(value)
         except (TypeError, ValueError):
             raise RulesValidationError(f"{name} must be a whole number") from None
-    for name in ("auto_start_daily", "next_day_time_exit"):
+    for name in ("auto_start_daily", "practice_real_prices", "next_day_time_exit"):
         flag = payload.get(name, OPTIONAL_DEFAULTS[name])
         if type(flag) is not bool:
             raise RulesValidationError(f"{name} must be true or false")

@@ -53,6 +53,9 @@ def _canceled_to_reprice(order) -> bool:
     return order["status"] in _CANCELED and order["cancel_requested_at_utc"] is not None
 
 
+# Consecutive failed quotes for one option before a person is alerted.
+QUOTE_FAILURES_BEFORE_ALERT = 5
+
 class SyntheticQuoteSource:
     """Deterministic offline quote feed for DRY-RUN.
 
@@ -132,6 +135,7 @@ class Engine:
         self.cal = cal
         self.mode = mode
         self.quote_source = quote_source
+        self._quote_failures: dict[str, int] = {}  # consecutive failed quotes per option
         self.sizer = sizer or FixedQuantitySizer(rules.max_dollars_per_position, rules.contracts_per_pick)
         # Callable(now) -> schwab_token.TokenStatus; required whenever a
         # component talks to Schwab (see _needs_schwab_token).
@@ -577,7 +581,9 @@ class Engine:
             if state.osi_symbol in halted:
                 self.log.warning("hold %s: halted until a person resolves an unknown order", state.osi_symbol)
                 continue
-            quote = self._quote(state.osi_symbol)
+            quote = self._try_quote(state.osi_symbol)
+            if quote is None:
+                continue  # no usable price this tick; try again next tick
             update_peak(state, quote)
             self.store.update_peak(state.entry_order_id, state.session_peak_mid)
             if exits:
@@ -720,7 +726,9 @@ class Engine:
         if row is None:
             return 0  # everything sold before the cancel landed
         remaining = int(row["quantity"])
-        quote = self._quote(state.osi_symbol)  # the current price, just before sending
+        quote = self._try_quote(state.osi_symbol)  # the current price, just before sending
+        if quote is None:
+            return 0  # the canceled sell is replaced on a later tick
         attempt = int(canceled["reprice_attempt"]) + 1
         decision = ExitDecision(
             strategy="Reprice",
@@ -806,3 +814,26 @@ class Engine:
         if self.quote_source is None:
             raise RuntimeError("engine has no quote_source; cannot run the exit loop")
         return self.quote_source(osi_symbol)
+
+    def _try_quote(self, osi_symbol: str) -> Quote | None:
+        """The current quote, or None when Schwab has no usable one (no bid, a
+        one-sided market, a network error). One bad quote must not stop the run
+        watching every other position; a person is alerted if it keeps failing."""
+        if self.quote_source is None:
+            raise RuntimeError("engine has no quote_source; cannot run the exit loop")
+        try:
+            quote = self.quote_source(osi_symbol)
+        except Exception as exc:  # noqa: BLE001 - any quote failure is handled the same way
+            failures = self._quote_failures.get(osi_symbol, 0) + 1
+            self._quote_failures[osi_symbol] = failures
+            self.log.warning("no usable quote for %s (%d in a row): %s", osi_symbol, failures, exc)
+            if failures == QUOTE_FAILURES_BEFORE_ALERT:
+                self.alerter.alert(
+                    "quote_unavailable", "No price for an open position",
+                    f"Schwab has not given a usable price for {contract_text(osi_symbol)} "
+                    f"{failures} times in a row, so no rule can sell it until it does. The bot "
+                    f"keeps trying. Check it in Schwab, and sell it there if you want out.",
+                    key=f"quote:{osi_symbol}")
+            return None
+        self._quote_failures.pop(osi_symbol, None)
+        return quote

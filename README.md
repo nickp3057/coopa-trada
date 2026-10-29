@@ -49,22 +49,28 @@ file paths, and selection changes are blocked until it stops.
 The original CSV-path endpoint and CLI remain available for already-prepared CSVs.
 The sample `data/signals.example.csv` matches the supplied screenshot exactly.
 
-## Daily auto-start
+## Practice prices
 
-Optional (`AUTO_START=1` in `.env`; `coopa_trada/scheduler.py`). On XNYS trading days
-at `AUTO_START_TIME` (Mountain time, default 07:15, before the 07:30 MT open) the app
-starts the day's run through the same runner as the Start button. It refuses, with an
-alert, when the Schwab login won't last through the next trading day's exit window,
-when the rules file can't be read, or (live only) when `LIVE_TRADING` is off or a
-setting is unconfirmed. Practice is the default; a live auto-start also needs
-`AUTO_START_LIVE="ENABLE LIVE TRADING"`, and the engine still applies every live gate.
-One attempt per day per process; a restart tries again.
+Practice (DRY-RUN) runs never send an order to Schwab. Where their prices come from is
+the `practice_real_prices` setting (Settings → "Practice runs use real Schwab prices"):
+
+- **off** (default): made-up prices (`SyntheticResolver`, `SyntheticQuoteSource`) that
+  drift down 1% on every check. No Schwab login needed. For testing the app: the P&L
+  is always a loss and says nothing about the picks.
+- **on**: real option chains and quotes from Schwab, with pretend fills (buys at the
+  ask, sells at the bid). Needs a Schwab login lasting through the hold, like a live run.
+
+When Schwab can't give a usable quote for an open position (no bid, a network error),
+that position is skipped for the tick instead of stopping the run; after 5 failures in
+a row a person is alerted.
+
+## End-of-day summary
 
 **End-of-day summary** (`DAILY_SUMMARY`, on by default; `coopa_trada/summary.py`): once
 the day's latest exit window has ended and no run is active (at the latest 30 minutes
 after the close), one alert with picks received, bought, skipped, positions held
 overnight and open issues (orders to reconcile, orders still working, a run error, a
-skipped auto-start, a stale live lock, a login that won't cover the next run). Counts
+stale live lock, a login that won't cover the next run). Counts
 only; no account numbers or amounts. Sent once per trading day (a marker file next to
 the database survives restarts).
 
@@ -240,17 +246,10 @@ The app never enables the environment opt-in itself.
 The broker adapter uses the documented [schwab-py order methods](https://schwab-py.readthedocs.io/en/latest/client.html)
 and [single-leg limit order templates](https://schwab-py.readthedocs.io/en/latest/order-templates.html).
 
-## Server deployment
-
-`deploy/` has a systemd unit (restart on crash and on boot, localhost-only dashboard,
-`UMask=0077`, Mountain-time logs), `setup_server.sh` (Ubuntu 24.04: time zone, swap,
-venv, service) and `lock_down.sh` (owner-only `.env`, Schwab login and database).
-Beginner walkthrough: **docs/AWS_SETUP.md** (t4g.micro, Tailscale, weekly reconnect).
-
 ## Limits and remaining integration work
 
 - No multi-leg spreads, strike-selection heuristics, or per-row expirations.
-- No historical backtesting or live-market paper-trading feed.
+- No historical backtesting. Practice on real prices (above) is the paper-trading mode.
 - No automatic adoption of untracked positions or automatic recovery of ambiguous
   submissions. Unfilled entries are canceled, not repriced.
 - Image extraction targets this table layout; always review the output.
