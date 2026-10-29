@@ -94,7 +94,7 @@ What changed, briefly:
 - **Telegram** (`coopa_trada/telegram_bot.py`, `docs/TELEGRAM_SETUP.md`): forward
   screenshot → preview with Confirm/Reject (also on the dashboard); allowed chat IDs only.
 
-## Decisions made (conservative option on each ambiguity)
+### Decisions made in that session
 
 1. **Task 0 could not run here**: no Schwab login in the cloud container. Built the
    read-only command instead; Nick runs it on his Mac.
@@ -152,6 +152,11 @@ run is accepted; the unknown-order test gets budget for both picks.
 
 ## Still untested
 
+- **Everything in `deploy/` on a real server**: `setup_server.sh` on Ubuntu 24.04 Arm,
+  the systemd unit, `tailscale serve` with the dashboard's same-origin check, the
+  Reconnect flow from a phone, ntfy from the server.
+- Auto-start and the summary inside the running app over a real day (unit-tested with a
+  fake clock and fake runner only).
 - Every real Schwab call except the login: run `python -m coopa_trada readonly-check`
   on the Mac first, then a dry-run day on real prices.
 - Real Claude API and Telegram Bot API calls (both only mocked).

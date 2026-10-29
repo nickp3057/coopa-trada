@@ -45,8 +45,9 @@ def main(argv: list[str] | None = None) -> int:
                             auto_start=AutoStarter(paths, app.config["COOPA_RUNNER"])).start()
         app.config["COOPA_RUNNER"].on_change = watchdog.poke
         app.config["COOPA_WATCHDOG"] = watchdog
-        from . import start_telegram
+        from . import start_scheduler, start_telegram
         start_telegram(app)
+        start_scheduler(app)
     print(
         f"Coopa Trada UI on http://{args.host}:{args.port}\n"
         f"  rules   : {paths.config_path}\n"

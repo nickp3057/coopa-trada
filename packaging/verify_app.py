@@ -147,8 +147,19 @@ def run_checks(target: str, app_path: Path | None) -> None:
             check(status == 409 and PHRASE in body["error"], "live refused without the typed phrase")
             status, body = live_start(app.port)
             check(status == 409 and "LIVE_TRADING" in body["error"], "live refused without LIVE_TRADING=1")
+            # On a trading day after 7:00 AM MT the automatic start may already have begun a
+            # run; switch it off for the rest of the checks and stop that run.
+            rules_file = home / "config" / "rules.yaml"
+            rules_file.write_text(rules_file.read_text().replace("auto_start_daily: true",
+                                                                 "auto_start_daily: false"))
+            call(app.port, "POST", "/api/run/stop", {})
+            for _ in range(300):
+                status, run = call(app.port, "GET", "/api/run/status")
+                if run["status"] != "running":
+                    break
+                time.sleep(0.1)
             status, body = call(app.port, "POST", "/api/run/start", {"date": "2026-10-15"})
-            check(status == 202, "dry run starts without a Schwab login")
+            check(status == 202, f"dry run starts without a Schwab login ({body})")
             for _ in range(300):
                 status, run = call(app.port, "GET", "/api/run/status")
                 if run["status"] == "idle":

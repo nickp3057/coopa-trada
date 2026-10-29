@@ -123,6 +123,9 @@ def api_run_status():
     snap["keep_awake"] = current_app.config["COOPA_KEEPAWAKE"].status()
     snap.update(settings_summary(_paths().config_path))
     snap["live_checks"] = _live_checks(snap)
+    scheduler = current_app.config.get("COOPA_SCHEDULER")
+    if scheduler is not None:
+        snap["schedule"] = scheduler.snapshot()
     return jsonify(snap)
 
 

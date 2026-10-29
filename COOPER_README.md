@@ -122,6 +122,9 @@ On a server (docs/SERVER_SETUP.md) steps 1 and 2 happen by themselves; skip to s
    picks; the status line says what it's doing. (Settings → Buying window can change
    the time or switch this off; then click **Start today's run** yourself.)
 3. **Check Schwab**: it should say **Connected** (or **Expiring soon**; see section 4).
+   After the selling window closes (about 2 PM MT) your phone gets one **summary**:
+   how many picks came in, were bought and skipped, what is held overnight, and
+   anything that needs you. It never shows account numbers or dollar amounts.
 4. **Send the picks** when they arrive (1:40–1:55 PM MT), either way:
    - **Telegram** (if set up, see docs/TELEGRAM_SETUP.md): forward the screenshot to the
      bot, check the list it sends back, press **✅ Confirm**.
@@ -182,8 +185,11 @@ Schwab makes everyone **log in again every 7 days**. The app counts down for you
   turns red even when there are still several days left, and the run won't start.
 
 Do the reconnect (section 2b, steps 1–7) **before** starting a run. It is refused
-while a run is in progress. The easy habit: **reconnect every Thursday or
-Friday morning**, then a Friday run is always covered.
+while a run is in progress. Because of the overnight hold, one 7-day login covers
+only **4 trading days of runs**, so once a week is not enough. The easy habit:
+**reconnect every Monday and Thursday afternoon** (after that day's run has
+finished). That covers every run, holiday weeks included. The app also alerts you
+("Reconnect Schwab before the next run") the day before a run it wouldn't cover.
 
 ---
 
@@ -214,7 +220,8 @@ working default; the full list with examples is at the end of docs/HOW_IT_TRADES
 
 ## 6. Things the app never does on its own
 
-- Switch from practice to real trading.
+- Switch from practice to real trading. (Auto-start runs practice unless Nick sets
+  it up for real trading on purpose, and even then every live check still applies.)
 - Resend an order it is unsure about.
 - Sell when you press **Stop**.
 - Send your Schwab password anywhere. You type it only on Schwab's own website.

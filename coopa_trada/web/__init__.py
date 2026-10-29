@@ -17,7 +17,7 @@ from .config import WebPaths, paths_from_env
 from .runner import EngineRunner
 from .views import bp
 
-__all__ = ["create_app", "start_telegram", "WebPaths", "EngineRunner"]
+__all__ = ["create_app", "start_telegram", "start_scheduler", "WebPaths", "EngineRunner"]
 
 
 def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None,
@@ -104,3 +104,12 @@ def start_telegram(app):
     poller = TelegramPoller(intake).start()
     app.config["COOPA_TELEGRAM_POLLER"] = poller
     return poller
+
+
+def start_scheduler(app):
+    """Start the end-of-day summary thread. Returns the scheduler."""
+    from ..scheduler import DailyScheduler
+    scheduler = DailyScheduler(app.config["COOPA_PATHS"], app.config["COOPA_RUNNER"],
+                               app.config["COOPA_ALERTER"]).start()
+    app.config["COOPA_SCHEDULER"] = scheduler
+    return scheduler
