@@ -89,7 +89,9 @@ def test_screenshot_gets_a_preview_with_buttons_and_nothing_is_saved(app, fake):
     assert imports(app) == []                                     # reading never confirms
 
 
-def test_confirm_button_saves_the_list_like_the_dashboard(app, fake):
+def test_confirm_button_saves_the_list_like_the_dashboard(app, fake, monkeypatch):
+    from coopa_trada import clock
+    monkeypatch.setattr(clock, "now_utc", lambda: datetime(2026, 9, 2, 19, 45, tzinfo=timezone.utc))
     bot = app.config["COOPA_TELEGRAM"]
     fake.updates = [photo(COOPER)]
     bot.poll_once()

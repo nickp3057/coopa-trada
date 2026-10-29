@@ -48,7 +48,10 @@ def test_dates_required_and_expiration_cannot_precede_trade_date(client):
         assert client.post("/api/signals/preview", json={"csv": CSV, "date": day, "expiration": exp}).status_code == 400
 
 
-def test_confirm_rejects_tampering_and_feeds_a_running_run(client):
+def test_confirm_rejects_tampering_and_feeds_a_running_run(client, monkeypatch):
+    from datetime import datetime, timezone
+    from coopa_trada import clock
+    monkeypatch.setattr(clock, "now_utc", lambda: datetime(2026, 9, 2, 19, 45, tzinfo=timezone.utc))
     assert client.post("/api/signals/confirm", json={"token": "made-up"}).status_code == 400
     tampered = client.post("/api/signals/preview", json={"csv": CSV, "date": "2026-09-02", "expiration": "2026-09-04"}).json
     assert client.post("/api/signals/confirm", json={"token": tampered["token"][:-2] + "xx"}).status_code == 400
@@ -59,6 +62,17 @@ def test_confirm_rejects_tampering_and_feeds_a_running_run(client):
     rv = client.post("/api/signals/confirm", json={"token": preview["token"]})
     assert rv.status_code == 200 and rv.json["run_active"] is True
     assert "buys them now" in rv.json["message"]
+
+
+def test_confirming_a_list_for_another_day_says_it_will_not_be_bought_today(client, monkeypatch):
+    from datetime import datetime, timezone
+    from coopa_trada import clock
+    monkeypatch.setattr(clock, "now_utc", lambda: datetime(2026, 9, 4, 17, 0, tzinfo=timezone.utc))
+    preview = client.post("/api/signals/preview", json={"csv": CSV, "date": "2026-09-02", "expiration": "2026-09-04"}).json
+    rv = client.post("/api/signals/confirm", json={"token": preview["token"]})
+    assert rv.status_code == 200
+    assert rv.json["message"].startswith("Picks confirmed for Wed Sep 2, not today (Fri Sep 4).")
+    assert "today's run will not buy these" in rv.json["message"]
 
 
 def test_upload_type_size_and_origin_are_checked(client):

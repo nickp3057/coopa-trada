@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
+from coopa_trada import clock
 from coopa_trada.calendar_svc import CalendarService
 from coopa_trada.idempotency import Intent
 from coopa_trada.picks import PickListSource, imports_dir, save_confirmed_list
@@ -107,6 +108,16 @@ def test_positions_held_from_earlier_days_are_listed(store):
     assert not body["list_loaded"]                                   # yesterday's list is not today's
     assert body["held"] == [{"name": "IBIT 44 put", "mode": "DRY-RUN", "quantity": 1,
                              "entry_price": 0.70, "bought_on": "2026-09-01"}]
+
+
+def test_a_list_confirmed_today_for_another_date_is_pointed_out(store):
+    save_confirmed_list(store_path(store), LIST.replace("2026-09-02", "2026-08-31"), "2026-08-31")
+    now = datetime.now(UTC)  # the list's name carries its real confirmation time
+    body = picks_today(store, imports_dir(store_path(store)), clock.to_market(now).date(), now=now, cal=CAL,
+                       rules=RULES)
+    assert not body["list_loaded"] and body["other_list"]["day"] == "2026-08-31"
+    # On another day, an old list is not mentioned.
+    assert today(store)["other_list"] is None
 
 
 def test_a_weekend_is_not_a_trading_day(store):

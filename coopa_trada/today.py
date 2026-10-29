@@ -95,6 +95,16 @@ def picks_today(store, folder, day: date, *, now: datetime, cal, rules=None) -> 
             picks.append({"name": contract_text(row["osi_symbol"]).split(",")[0], "expiration": None,
                           **_status(store, row["signal_id"], d, report, phase)})
 
+    # The newest list confirmed for another trade date, so a list confirmed under the
+    # wrong date does not look like nothing happened.
+    other = None
+    if path is None:
+        lists = [p for p in Path(folder).glob("*.csv") if p.is_file()] if Path(folder).is_dir() else []
+        newest = max(lists, key=lambda p: (p.stat().st_mtime_ns, p.name), default=None)
+        confirmed = _confirmed_at(newest) if newest is not None else None
+        if confirmed and clock.to_market(datetime.fromisoformat(confirmed)).date() == day:
+            other = {"day": newest.name[:10], "confirmed_at": confirmed}
+
     held = [{"name": contract_text(r["osi_symbol"]).split(",")[0], "mode": r["mode"],
              "quantity": r["quantity"], "entry_price": r["entry_price"], "bought_on": r["trading_day"]}
             for r in store.open_positions() if r["trading_day"] and r["trading_day"] < d]
@@ -105,6 +115,7 @@ def picks_today(store, folder, day: date, *, now: datetime, cal, rules=None) -> 
         "list_loaded": path is not None and list_error is None,
         "confirmed_at": _confirmed_at(path) if path is not None else None,
         "list_error": list_error,
+        "other_list": other,
         "buy_window": window,
         "phase": phase if trading_day else None,
         "picks": picks,

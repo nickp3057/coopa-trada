@@ -609,9 +609,16 @@ def confirm_picks(csv_text: str, trade_date: str) -> dict:
         _paths().signals_path = str(path)
         running = runner.status == "running"
         mode = "practice" if runner.mode == "DRY-RUN" else "LIVE"
-    if running:
+    from datetime import date
+    from ..clock import now_utc, to_market
+    day, today = date.fromisoformat(trade_date), to_market(now_utc()).date()
+    if day != today:
+        message = (f"Picks confirmed for {day:%a %b} {day.day}, not today ({today:%a %b} {today.day}). "
+                   "A list is only bought on its trade date, so today's run will not buy these. "
+                   "If they are today's picks, preview them again with today's trade date.")
+    elif running:
         message = (f"Picks confirmed. The {mode} run in progress buys them now if it is inside the "
-                   "buying window (and if the run is for this trade date).")
+                   "buying window.")
     else:
         message = "Picks confirmed. No run is active: start today's run to buy them."
     return {"signals_path": str(path), "date": trade_date, "message": message, "run_active": running}

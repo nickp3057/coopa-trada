@@ -52,6 +52,12 @@ function headline(b) {
   const day = dayText(b.day);
   if (!b.trading_day) return [`${day}: the market is closed today.`, "warn"];
   if (b.list_error) return [b.list_error, "is-error"];
+  if (!b.list_loaded && b.other_list) {
+    const o = b.other_list;
+    return [`No picks loaded for ${day}. The list confirmed at ${clockMT(o.confirmed_at)} is for ` +
+            `${dayText(o.day)}, and a list is only bought on its trade date. If those are today's ` +
+            `picks, upload them again with today's trade date.`, "is-error"];
+  }
   if (!b.list_loaded) return [`No picks loaded for ${day} yet.`, "warn"];
   const n = b.picks.length;
   return [`${n} pick${n === 1 ? "" : "s"} loaded for ${day}` +
