@@ -629,6 +629,24 @@ class Store:
             out.append(d)
         return out
 
+    def clear_practice_log(self) -> dict:
+        """Delete every practice (DRY-RUN) order, fill, sell decision, skip and
+        incident. Real (LIVE) rows are never touched. Returns the counts deleted."""
+        practice = "SELECT id FROM orders WHERE mode = 'DRY-RUN'"
+        with self.transaction():
+            counts = {"positions": self.conn.execute(
+                "SELECT COUNT(*) FROM orders WHERE mode = 'DRY-RUN' AND intent = 'ENTRY'").fetchone()[0]}
+            for name, sql in (
+                ("exit_events", f"DELETE FROM exit_events WHERE order_id IN ({practice})"),
+                ("position_peaks", f"DELETE FROM position_peaks WHERE order_id IN ({practice})"),
+                ("incidents", "DELETE FROM order_incidents WHERE mode = 'DRY-RUN'"),
+                ("fills", "DELETE FROM fills WHERE mode = 'DRY-RUN'"),
+                ("orders", "DELETE FROM orders WHERE mode = 'DRY-RUN'"),
+                ("skips", "DELETE FROM skip_events WHERE mode = 'DRY-RUN'"),
+            ):
+                counts[name] = self.conn.execute(sql).rowcount
+        return counts
+
     # -- transactions ---------------------------------------------
     def transaction(self):
         return _Tx(self.conn)

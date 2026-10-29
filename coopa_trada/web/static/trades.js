@@ -53,4 +53,21 @@ async function load() {
 }
 
 document.getElementById("btn-refresh").addEventListener("click", load);
+
+// Clear practice log (for testing): two clicks, practice rows only.
+const clearBox = document.getElementById("clear-confirm");
+const clearMsg = document.getElementById("clear-msg");
+document.getElementById("btn-clear").addEventListener("click", () => {
+  clearMsg.textContent = "";
+  clearBox.hidden = false;
+});
+document.getElementById("btn-clear-no").addEventListener("click", () => { clearBox.hidden = true; });
+document.getElementById("btn-clear-yes").addEventListener("click", async () => {
+  clearBox.hidden = true;
+  const { ok, body } = await CT.post("/api/trades/clear", { confirm: true });
+  clearMsg.textContent = ok ? body.message : (body.error || "Could not clear the log.");
+  clearMsg.className = "msg " + (ok ? "ok" : "is-error");
+  load();
+});
+
 load();

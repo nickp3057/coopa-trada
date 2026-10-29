@@ -4,8 +4,20 @@
 <section class="card">
   <div class="row spread">
     <h1>Trade log</h1>
-    <button id="btn-refresh" class="btn">Refresh</button>
+    <div class="row">
+      <button id="btn-refresh" class="btn">Refresh</button>
+      <button id="btn-clear" class="btn">Clear practice log</button>
+    </div>
   </div>
+  <div id="clear-confirm" class="alert" hidden>
+    <p>Delete every <strong>practice</strong> trade from the log? This can&rsquo;t be undone.
+      Real-money trades are never deleted. Confirmed pick lists are kept.</p>
+    <div class="row">
+      <button id="btn-clear-yes" class="btn btn-danger">Yes, clear practice trades</button>
+      <button id="btn-clear-no" class="btn" type="button">Cancel</button>
+    </div>
+  </div>
+  <p id="clear-msg" class="msg" role="status"></p>
   <p class="hint">One row per position. Point&#8209;in&#8209;time snapshot of the same
     <code>orders</code> / <code>fills</code> / <code>exit_events</code> the engine writes.</p>
   <div id="trades-summary" class="summary"></div>

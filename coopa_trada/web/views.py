@@ -136,6 +136,24 @@ def api_today():
     return jsonify(body)
 
 
+@bp.post("/api/trades/clear")
+def api_trades_clear():
+    """Delete the practice trade log (for testing). Real-money records are kept."""
+    from ..runlock import database_lock_path, inspect_lock
+    if not (request.get_json(silent=True) or {}).get("confirm"):
+        return jsonify(error="Not cleared: confirmation missing."), 400
+    if _runner().status == "running" or inspect_lock(database_lock_path(_paths().db_path))["state"] == "held":
+        return jsonify(error="A run is going. Stop it first, then clear the practice log."), 409
+    store = Store.open(_paths().db_path)
+    try:
+        counts = store.clear_practice_log()
+    finally:
+        store.close()
+    n = counts["positions"]
+    return jsonify(cleared=counts, message=f"Cleared {n} practice position{'' if n == 1 else 's'}. "
+                                           "Real-money records were not touched.")
+
+
 # -- run control ----------------------------------------------------
 @bp.get("/api/run/status")
 def api_run_status():
