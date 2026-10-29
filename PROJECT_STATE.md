@@ -32,6 +32,11 @@ The plain-English rulebook, with dollar examples and every setting, is
 - **Exit loop survives bad quotes**: an invalid quote or quote error used to raise
   out of `_exit_tick` and stop the whole run (live too). Now that position is skipped
   for the tick; 5 failures in a row alert ("No price for an open position").
+- **Dashboard "Today's picks" card** (`coopa_trada/today.py`, `GET /api/today`,
+  `static/today.js`): whether today's list is loaded and when it was confirmed, whether
+  a run is going to buy it, each pick's status (waiting / buy order working / bought /
+  sold with P&L / skipped with the reason / unclear), and positions held from earlier
+  days. Refreshes every 10 s. Read-only.
 - `packaging/verify_app.py` switches auto-start off in its scratch folder (it failed
   during market hours because the automatic start had already begun a run).
 
@@ -208,6 +213,15 @@ run is accepted; the unknown-order test gets budget for both picks.
    days (automatic start, Telegram confirm). Their P&L is the first meaningful one.
 4. Supervised live checks with one cheap contract (buy, sell, a forced reprice), then
    `LIVE_TRADING=1`, then the Dashboard's Real money switch.
+
+## To do (on hold)
+
+- **Tests for the money paths** (decided 2026-10-29: target the risky code, not 99%
+  overall; coverage was 87% with 447 tests). Fill the gaps in `broker.py` (real
+  order code, 88%), `engine.py` (91%) and `ratelimit.py` (44%; now also used by
+  practice on real prices, so a fault could get the bot throttled by Schwab).
+  Launch code (`desktop.py`, `__main__.py`, `web/__main__.py`) is not worth it.
+  Measure with `.venv/bin/python -m pytest --cov=coopa_trada` (needs `pytest-cov`).
 
 ## Validation
 

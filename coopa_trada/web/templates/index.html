@@ -3,6 +3,18 @@
 {% block content %}
 <div id="schwab-banner" class="alert" role="alert" hidden></div>
 <div id="attention-banner" class="alert alert-error" role="alert" hidden></div>
+<section class="card" id="today-card">
+  <h2>Today&rsquo;s picks</h2>
+  <p id="today-headline" class="status-line">checking&hellip;</p>
+  <p id="today-run" class="status-line"></p>
+  <div id="today-picks" class="table-wrap"></div>
+  <div id="today-held" hidden>
+    <h3>Held from earlier days</h3>
+    <div id="today-held-table" class="table-wrap"></div>
+  </div>
+  <p class="hint">Updates on its own. Sold picks and their profit or loss are also on the
+    <a href="/trades">Trade log</a>.</p>
+</section>
 <section class="card" id="telegram-card" hidden>
   <h2>Picks sent by Telegram</h2>
   <p class="hint">Lists forwarded to the Telegram bot wait here as well as in Telegram.
@@ -119,4 +131,4 @@
   <p id="reconnect-msg" class="msg" role="status"></p>
 </section>
 {% endblock %}
-{% block script %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script><script src="{{ url_for('static', filename='imports.js') }}"></script><script src="{{ url_for('static', filename='telegram.js') }}"></script>{% endblock %}
+{% block script %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script><script src="{{ url_for('static', filename='imports.js') }}"></script><script src="{{ url_for('static', filename='telegram.js') }}"></script><script src="{{ url_for('static', filename='today.js') }}"></script>{% endblock %}

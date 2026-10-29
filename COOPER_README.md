@@ -135,6 +135,11 @@ On a server (docs/SERVER_SETUP.md) steps 1 and 2 happen by themselves; skip to s
      (fix misread text right there), click **Preview picks**, then **Confirm and select
      these picks**.
 
+   To check the list went in, look at **Today's picks** at the top of the Dashboard: it
+   says how many picks are loaded and when they were confirmed, whether a run is going
+   to buy them, and each pick's status (waiting, bought, sold with its profit or loss,
+   or skipped with the reason). It also lists anything held from earlier days.
+
    The run **buys as soon as you confirm**, between 1:30 and 1:57 PM MT (earlier on half
    days). Then it watches and sells by the rules: a take-profit sells the same day;
    otherwise the position is held and sold on the next trading day.

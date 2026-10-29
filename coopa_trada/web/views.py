@@ -113,6 +113,29 @@ def api_trades():
     )
 
 
+@bp.get("/api/today")
+def api_today():
+    """Today's picks: is a list loaded, and what happened to each pick."""
+    from ..calendar_svc import CalendarService
+    from ..clock import now_utc, to_market
+    from ..picks import imports_dir
+    from ..today import picks_today
+
+    now = now_utc()
+    try:
+        rules = load_rules(_paths().config_path)
+    except (ValueError, TypeError, OSError):
+        rules = None  # the buying window is left out; the Dashboard reports the file elsewhere
+    store = Store.open(_paths().db_path)
+    try:
+        body = picks_today(store, imports_dir(_paths().db_path), to_market(now).date(), now=now,
+                           cal=CalendarService(), rules=rules)
+    finally:
+        store.close()
+    body["run_active"] = _runner().status == "running"
+    return jsonify(body)
+
+
 # -- run control ----------------------------------------------------
 @bp.get("/api/run/status")
 def api_run_status():
