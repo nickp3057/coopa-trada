@@ -141,7 +141,20 @@ function collect() {
   return payload;
 }
 
+// "Your rules at a glance": the same plain-words summary the Dashboard uses.
+async function loadGlance() {
+  const box = document.getElementById("glance");
+  const { ok, body } = await CT.get("/api/run/status");
+  box.innerHTML = "";
+  if (!ok) { box.append(CT.el("div", {}, CT.el("dd", { class: "error", text: "Could not load." }))); return; }
+  if (body.settings_error) box.append(CT.el("div", {}, CT.el("dd", { class: "error", text: body.settings_error })));
+  for (const item of body.settings_summary || []) {
+    box.append(CT.el("div", {}, CT.el("dt", { text: item.label }), CT.el("dd", { text: item.current })));
+  }
+}
+
 async function load() {
+  loadGlance();
   msg.textContent = "";
   const { ok, body } = await CT.get("/api/rules");
   if (ok) fill(body);
@@ -156,6 +169,7 @@ form.addEventListener("submit", async (ev) => {
   const { ok, body } = await CT.post("/api/rules", collect());
   if (ok) {
     fill(body);
+    loadGlance();
     showSavebar(true);
     if (body.run_going) {
       // The run going now keeps the settings it started with until it is restarted.

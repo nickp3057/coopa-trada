@@ -45,6 +45,9 @@ function renderSwitch(s) {
     ? "Real money is ON: Start and the 7:00 AM automatic run place real orders. Turn it off below."
     : on ? "Real money is switched on, but this bot isn't allowed to trade real money on the server yet, so runs are practice."
       : "Real money is off, so every run is practice: nothing is sent to Schwab.";
+  CT.tile("tile-money", armed ? { value: "REAL MONEY", sub: "Runs place real orders", cls: "bad" }
+    : on ? { value: "Practice", sub: "Switched on, but not allowed on the server yet", cls: "warn" }
+      : { value: "Practice", sub: "Nothing is sent to Schwab", cls: "ok" });
 }
 
 function renderLiveSettings(s) {
@@ -98,6 +101,10 @@ function renderStatus(s) {
   statusLine.classList.toggle("is-error", !!s.last_error);
   statusLine.classList.toggle("is-running", running);
   renderAwake(s.keep_awake);
+  CT.tile("tile-run", s.last_error && !running
+    ? { value: "Stopped with an error", sub: s.last_error, cls: "bad" }
+    : running ? { value: "Running", sub: s.activity || ("since " + CT.fmtTime(s.last_started)), cls: "info" }
+      : { value: "Not running", sub: s.last_finished ? "Last run " + CT.fmtTime(s.last_finished) : "Starts by itself at 7:00 AM MT", cls: "" });
 
   if (s.live_confirm_phrase) {
     confirmPhrase = s.live_confirm_phrase;
@@ -141,7 +148,8 @@ function fmtRemaining(ms) {
 
 function renderCountdown() {
   if (!tokenExpiresAt) { schwabCountdown.textContent = ""; return; }
-  schwabCountdown.textContent = "Login expires in " + fmtRemaining(tokenExpiresAt - Date.now()) +
+  const left = tokenExpiresAt - Date.now();
+  schwabCountdown.textContent = (left > 0 ? "Login expires in " + fmtRemaining(left) : "Login expired") +
     " (" + CT.fmtTime(tokenExpiresAt) + ")";
 }
 
@@ -149,7 +157,7 @@ async function loadToken() {
   const { ok, body } = await CT.get("/api/token");
   if (!ok) return;
   const cls = STATE_CLASS[body.state] || "is-error";
-  schwabState.textContent = "Schwab: " + body.label;
+  schwabState.textContent = body.label;
   schwabState.className = "state-pill " + cls;
   tokenStatus.textContent = body.message + (body.app_configured ? "" :
     " The Schwab app key and secret are not in the .env file yet, so Reconnect will not work until they are.");
@@ -159,6 +167,9 @@ async function loadToken() {
     tokenStatus.textContent += " The next run needs Schwab until " + body.needed_until_text +
       (body.covers_next_run ? " (covered)." : ", and this login does not last that long.");
   }
+  const tileCls = { connected: "ok", expiring_soon: "warn" }[body.state] || "bad";
+  CT.tile("tile-schwab", { value: body.label, cls: tileCls,
+    sub: tokenExpiresAt && tokenExpiresAt > Date.now() ? "Expires in " + fmtRemaining(tokenExpiresAt - Date.now()) : "Click to reconnect" });
   schwabBanner.hidden = !body.warning;
   if (body.warning) {
     // Not lasting through the next run's hold blocks it, so it is an error, not a warning.

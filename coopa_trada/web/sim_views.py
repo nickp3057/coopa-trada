@@ -330,7 +330,9 @@ def api_watch():
                 sell_by = cal.sell_by(nxt, rules.next_day_sell_by).isoformat() if rules.next_day_time_exit else None
             except Exception:  # noqa: BLE001
                 pass
-            out.append({"osi": row["osi_symbol"], "mode": row["mode"], "qty": row["quantity"],
+            from ..alerts import contract_text
+            out.append({"osi": row["osi_symbol"], "name": contract_text(row["osi_symbol"]),
+                        "mode": row["mode"], "qty": row["quantity"],
                         "bought_at": row["entry_at_utc"], "paid": fill, "ref": ref, "peak": peak,
                         "entry_day": entry_day, "sell_by": sell_by,
                         "mid": q["mid"] if q else None, "bid": q["bid"] if q else None,

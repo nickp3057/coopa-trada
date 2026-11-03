@@ -2,15 +2,238 @@
 {% block title %} &middot; Settings{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>Settings</h1>
-  <p class="hint">Your own bot&rsquo;s settings. A run uses the settings it started with: after saving,
-    restart a run that&rsquo;s going (you&rsquo;ll get a button). Changes never touch anyone else&rsquo;s bot. All times are Mountain (MT).</p>
-  <nav class="chips" aria-label="Sections">
-    <a href="#s-schwab">Schwab app</a><a href="#s-schedule">Schedule</a><a href="#s-buying">Buying</a>
-    <a href="#s-selling">Selling</a><a href="#s-unfilled">Unfilled sells</a><a href="#s-advanced">Advanced</a>
-    <a href="#alerts-card">Alerts</a>
-  </nav>
+  <div>
+    <h1>Settings</h1>
+    <p class="hint">This bot only. All times are Mountain (MT). A run uses the settings it started with;
+      after saving you&rsquo;ll get a button to restart one that&rsquo;s going.</p>
+  </div>
 </div>
+
+<section class="card" id="glance-card">
+  <div class="card-head">
+    <h2>Your rules at a glance</h2>
+    <span class="tip" data-tip="The settings below in plain words, as the next run will use them."></span>
+  </div>
+  <dl id="glance" class="glance"><div><dd class="hint">loading&hellip;</dd></div></dl>
+</section>
+
+<div class="settings-layout">
+  <nav class="side-nav" aria-label="Sections">
+    <a href="#s-selling">When it sells</a>
+    <a href="#s-buying">What it buys</a>
+    <a href="#s-schedule">Daily schedule</a>
+    <a href="#s-unfilled">Unfilled sells</a>
+    <a href="#s-advanced">Advanced</a>
+    <a href="#alerts-card">Alerts</a>
+    <a href="#s-schwab">Schwab app</a>
+  </nav>
+
+  <div>
+<form id="rules-form" novalidate>
+  <p class="error banner-error" id="rules-file-warning" hidden></p>
+
+  <section class="card scard" id="s-selling">
+    <div class="scard-head"><h2>When it sells</h2></div>
+    <p class="scard-intro">Several rules watch at once; whichever fires first sells. The rules judge on the mid
+      and sell at the bid.</p>
+    <div class="grid3">
+      <div class="field">
+        <label for="f-tp">Take profit <span class="tip" data-tip="Sell once the price is this far above the buy price. Bought at $1.00 with 60%: sells at $1.60."></span></label>
+        <div class="unit"><input id="f-tp" name="take_profit_pct" data-pct type="number" min="1" max="99.9" step="1"><span>% up</span></div>
+      </div>
+      <div class="field">
+        <label for="f-sl">Hard stop <span class="tip" data-tip="Sell once the price is this far below the buy price. Bought at $1.00 with 40%: sells at $0.60."></span></label>
+        <div class="unit"><input id="f-sl" name="hard_stop_loss_pct" data-pct type="number" min="1" max="99.9" step="1"><span>% down</span></div>
+      </div>
+      <div class="field">
+        <label for="f-ts">Trailing stop <span class="tip" data-tip="Sell once the price falls this far below its highest point. High $2.00 with 25%: sells at $1.50."></span></label>
+        <div class="unit"><input id="f-ts" name="trailing_stop_pct" data-pct type="number" min="1" max="99.9" step="1"><span>% off the high</span></div>
+      </div>
+    </div>
+
+    <div class="subsection">
+      <h3>10-point rule</h3>
+      <div class="grid2">
+        <div class="field">
+          <label for="f-pts">Sell when profit falls <span class="tip" data-tip="Cooper's rule: sell when profit drops this many percentage points below its best. Bought $1.00, best $2.00 (+100%), 10 points: sells at $1.90 (+90%). Blank turns it off."></span></label>
+          <div class="unit"><input id="f-pts" name="profit_trail_points" type="number" min="0.5" max="99" step="0.5" placeholder="off"><span>points below its best</span></div>
+        </div>
+        <div class="field">
+          <label for="f-arm">Starts working <span class="tip" data-tip="From purchase: before any gain it works like a −10% stop. Only once in profit: waits until the price has been above the buy price."></span></label>
+          <select id="f-arm" name="profit_trail_arm">
+            <option value="from_entry">From purchase (a stop before any gain)</option>
+            <option value="in_profit">Only once it has been in profit</option>
+          </select>
+        </div>
+      </div>
+      <details class="quiet"><summary>More about this rule</summary><p class="help" id="profit-trail-note"></p></details>
+    </div>
+
+    <div class="subsection">
+      <h3>Day of purchase and the next day</h3>
+      <label class="switch" data-tip="On: the hard stop, trailing stops and 10-point rule also protect a position from the moment it's bought. Off: only the take-profit can sell it that day.">
+        <input type="checkbox" name="stops_on_entry_day"><span class="slider" aria-hidden="true"></span>
+        Stops also protect a position on the day it&rsquo;s bought</label>
+      <label class="switch" data-tip="On: anything still held is sold on the next trading day by the sell-by time, so nothing is held more than one night. Off: keep holding until a rule fires (an option is still sold on its expiration day).">
+        <input type="checkbox" name="next_day_time_exit"><span class="slider" aria-hidden="true"></span>
+        Sell anything still open on the next trading day</label>
+      <div class="grid3">
+        <div class="field">
+          <label for="f-sellby">Next day, sell by <span class="tip" data-tip="Cooper: sold before 10:00 AM. 9:55 AM leaves time for the order to fill (an unfilled sell is repriced every minute)."></span></label>
+          <input id="f-sellby" name="next_day_sell_by" type="time">
+        </div>
+        <div class="field">
+          <label for="f-held">Next-day watching starts <span class="tip" data-tip="open = the market open (7:30 AM MT). Or a New York time like 10:00, or a number of minutes before the close. Never later than the sell-by time."></span></label>
+          <input id="f-held" name="held_exit_start" type="text" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="f-ref">Measure gains from <span class="tip" data-tip="The mid at purchase (recommended): a wide bid–ask gap isn't an instant loss. Bought at a $1.00 ask with a $0.80 bid, the rules start from $0.90. The trade log always shows the real prices."></span></label>
+          <select id="f-ref" name="exit_reference_price">
+            <option value="mid_at_entry">The mid at purchase</option>
+            <option value="fill">The price paid (the ask)</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <details class="subsection">
+      <summary>Older 10% stops</summary>
+      <p class="help" id="ambiguous-note"></p>
+      <div class="grid2">
+        <div class="field">
+          <label for="f-cp">Drop from the high</label>
+          <div class="unit"><input id="f-cp" name="cooper_drop_from_peak_pct" data-pct type="number" min="1" max="99.9" step="1" placeholder="off"><span>%</span></div>
+        </div>
+        <div class="field">
+          <label for="f-ce">Drop from purchase</label>
+          <div class="unit"><input id="f-ce" name="cooper_drop_from_entry_pct" data-pct type="number" min="1" max="99.9" step="1" placeholder="off"><span>%</span></div>
+        </div>
+      </div>
+    </details>
+  </section>
+
+  <section class="card scard" id="s-buying">
+    <div class="scard-head"><h2>What it buys</h2></div>
+    <p class="scard-intro">Picks are bought highest delta first while each still fits the budget.</p>
+    <div class="grid2">
+      <div class="field">
+        <label for="f-budget">Total budget <span class="tip" data-tip="The most everything open may cost together: today's buys, positions held from yesterday, and buy orders still waiting. Counted at the ask × 100."></span></label>
+        <div class="unit pre"><span>$</span><input id="f-budget" name="total_budget" type="number" min="1" step="1"></div>
+      </div>
+      <div class="field">
+        <label for="f-cap">Per-pick cap <span class="tip" data-tip="A pick whose contract(s) cost more than this is skipped entirely."></span></label>
+        <div class="unit pre"><span>$</span><input id="f-cap" name="max_dollars_per_position" type="number" min="1" step="1"></div>
+      </div>
+      <div class="field">
+        <label for="f-qty">Contracts per pick <span class="tip" data-tip="How many contracts of each pick. The cap and the budget count them all."></span></label>
+        <input id="f-qty" name="contracts_per_pick" type="number" min="1" max="100" step="1">
+      </div>
+      <div class="field">
+        <label for="f-rank">Buy first <span class="tip" data-tip="Schwab live: the delta from Schwab at buying time (fresh, not read off a picture). TVT: the TVT-DELTA column on the list. A pick with no delta goes last."></span></label>
+        <select id="f-rank" name="rank_delta_source">
+          <option value="schwab_live">Highest Schwab delta (live)</option>
+          <option value="tvt">Highest TVT delta (from the list)</option>
+        </select>
+      </div>
+    </div>
+    <div class="subsection">
+      <label class="switch" data-tip="Off: every pick on the list can be bought (the list is treated as already screened).">
+        <input type="checkbox" name="delta_enabled"><span class="slider" aria-hidden="true"></span>
+        Skip picks outside a delta range</label>
+      <div class="grid3" id="delta-fields">
+        <div class="field">
+          <label for="f-dsrc">Delta column</label>
+          <select id="f-dsrc" name="delta_source">
+            <option value="schwab">Schwab (0&ndash;1)</option>
+            <option value="tvt">TVT (0&ndash;100)</option>
+          </select>
+        </div>
+        <div class="field"><label for="f-dmin">Lowest |delta|</label><input id="f-dmin" name="delta_min_abs_delta" type="number" min="0" step="any"></div>
+        <div class="field"><label for="f-dmax">Highest |delta|</label><input id="f-dmax" name="delta_max_abs_delta" type="number" min="0" step="any"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card scard" id="s-schedule">
+    <div class="scard-head"><h2>Daily schedule</h2></div>
+    <label class="switch" data-tip="Practice unless the Dashboard's Real money switch is on. A run you started or stopped yourself that day is left alone.">
+      <input type="checkbox" name="auto_start_daily"><span class="slider" aria-hidden="true"></span>
+      Start the day&rsquo;s run automatically on trading days</label>
+    <label class="switch" data-tip="On: practice uses real Schwab option prices with pretend orders, so results show how the picks would really have done (needs the Schwab login). Off: made-up prices that drift down, for testing the app only.">
+      <input type="checkbox" name="practice_real_prices"><span class="slider" aria-hidden="true"></span>
+      Practice runs use real Schwab prices</label>
+    <div class="grid3">
+      <div class="field">
+        <label for="f-autotime">Start time <span class="tip" data-tip="Mountain time. 7:00 AM is 30 minutes before the open."></span></label>
+        <input id="f-autotime" name="auto_start_time" type="time">
+      </div>
+      <div class="field">
+        <label for="f-early">Earliest buy <span class="tip" data-tip="No buys before this, even if a list is confirmed earlier (a guard against a list confirmed hours early). Half days move it with the early close."></span></label>
+        <div class="unit"><input id="f-early" name="earliest_buy_minutes_before_close" type="number" min="1" max="390" step="1"><span>min before close</span></div>
+        <p class="help" data-mt-for="earliest_buy_minutes_before_close"></p>
+      </div>
+      <div class="field">
+        <label for="f-late">No new buys after <span class="tip" data-tip="A list confirmed after this is not bought; the log says it came after the cutoff."></span></label>
+        <div class="unit"><input id="f-late" name="no_new_buys_minutes_before_close" type="number" min="0" max="389" step="1"><span>min before close</span></div>
+        <p class="help" data-mt-for="no_new_buys_minutes_before_close"></p>
+      </div>
+    </div>
+  </section>
+
+  <section class="card scard" id="s-unfilled">
+    <div class="scard-head">
+      <h2>Unfilled sells</h2>
+      <span class="tip" data-tip="A real sell that hasn't filled is canceled and replaced at the current bid. Only ever lower, never a market order. After the last try you get a phone alert."></span>
+    </div>
+    <div class="grid2">
+      <div class="field">
+        <label for="f-rpa">Move the price after</label>
+        <div class="unit"><input id="f-rpa" name="exit_reprice_after_seconds" type="number" min="10" max="3600" step="5"><span>seconds</span></div>
+      </div>
+      <div class="field">
+        <label for="f-rpm">At most</label>
+        <div class="unit"><input id="f-rpm" name="exit_reprice_max_attempts" type="number" min="0" max="20" step="1"><span>times (0 = off)</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card scard" id="s-advanced">
+    <details>
+      <summary><h2 class="inline-h">Advanced</h2></summary>
+      <h3 style="margin-top:12px">Exit windows <span class="tip" data-tip="On the day of purchase, when a buy order that hasn't filled is canceled and when the window ends. Each end is a New York time (15:35 = 1:35 PM MT) or minutes before the close."></span></h3>
+      <div id="exit-window-rows"></div>
+      <div class="grid2">
+        <div class="field">
+          <label for="f-poll">Check prices every</label>
+          <div class="unit"><input id="f-poll" name="poll_interval_seconds" type="number" min="1" step="1"><span>seconds</span></div>
+        </div>
+      </div>
+      <p class="hint" id="rules-path"></p>
+    </details>
+  </section>
+
+  <div class="savebar" id="savebar" role="region" hidden aria-label="Save settings">
+    <span id="dirty" class="dirty" hidden>Unsaved changes</span>
+    <span id="rules-msg" class="msg" role="status"></span>
+    <button type="button" id="btn-restart-run" class="btn btn-primary" hidden>Restart the run with these</button>
+    <button type="button" id="btn-reload" class="btn">Discard</button>
+    <button type="submit" class="btn btn-primary">Save settings</button>
+  </div>
+</form>
+
+<section class="card scard" id="alerts-card">
+  <div class="scard-head">
+    <h2>Alerts</h2>
+    <span class="tip" data-tip="When something needs you (a sell that failed or isn't filling, an order Schwab may not have received, the Schwab login running out, a run that stopped with an error) a push goes to your phone through ntfy, and a notification on a Mac. Never account numbers or dollar amounts."></span>
+  </div>
+  <ul id="alert-channels" class="plain-list"></ul>
+  <div class="row">
+    <button type="button" id="btn-test-alert" class="btn">Send test alert</button>
+    <span id="alert-msg" class="msg" role="status"></span>
+  </div>
+  <h3>Recent alerts</h3>
+  <ul id="alert-recent" class="plain-list"><li class="hint">None since the app started.</li></ul>
+</section>
 
 <!-- Schwab app details: saved to this bot's own .env, separately from the trading rules. -->
 <section class="card scard" id="s-schwab">
@@ -35,14 +258,12 @@
       <input id="k-secret" name="app_secret" type="password" autocomplete="new-password">
     </div>
     <div class="field">
-      <label for="k-callback">Callback URL</label>
+      <label for="k-callback">Callback URL <span class="tip" data-tip="Exactly as on the Schwab app, normally https://127.0.0.1:8182"></span></label>
       <input id="k-callback" name="callback_url" type="text" spellcheck="false" autocapitalize="off">
-      <p class="help">Exactly as on the Schwab app, normally https://127.0.0.1:8182</p>
     </div>
     <div class="field">
-      <label for="k-account">Account number <span class="opt">optional</span></label>
+      <label for="k-account">Account number <span class="opt">optional</span> <span class="tip" data-tip="Which account to trade, if your login has more than one."></span></label>
       <input id="k-account" name="account_id" type="text" inputmode="numeric">
-      <p class="help">Which account to trade, if your login has more than one.</p>
     </div>
     <div class="field span2 actions">
       <button type="submit" class="btn btn-primary">Save Schwab app</button>
@@ -51,223 +272,7 @@
   </form>
   </div>
 </section>
-
-<form id="rules-form" novalidate>
-  <p class="error banner-error" id="rules-file-warning" hidden></p>
-
-  <section class="card scard" id="s-schedule">
-    <div class="scard-head"><h2>Daily schedule</h2></div>
-    <div class="grid2">
-      <div class="field span2">
-        <label class="switch"><input type="checkbox" name="auto_start_daily"><span class="slider" aria-hidden="true"></span>
-          Start the day&rsquo;s run automatically on trading days</label>
-        <p class="help">A practice run unless the Dashboard&rsquo;s <strong>Real money</strong> switch is on.
-          A run you started or stopped yourself that day is left alone.</p>
-      </div>
-      <div class="field span2">
-        <label class="switch"><input type="checkbox" name="practice_real_prices"><span class="slider" aria-hidden="true"></span>
-          Practice runs use real Schwab prices</label>
-        <p class="help">Real option prices, pretend orders: nothing is sent to Schwab, but practice
-          results show how the picks would really have done. Needs the Schwab login.
-          Off: made-up prices that always drift down, for testing the app only.</p>
-      </div>
-      <div class="field">
-        <label for="f-autotime">Start time (MT)</label>
-        <input id="f-autotime" name="auto_start_time" type="time">
-        <p class="help">7:00 AM is 30 minutes before the open.</p>
-      </div>
-      <div class="field"></div>
-      <div class="field">
-        <label for="f-early">Earliest buy</label>
-        <div class="unit"><input id="f-early" name="earliest_buy_minutes_before_close" type="number" min="1" max="390" step="1"><span>min before close</span></div>
-        <p class="help" data-mt-for="earliest_buy_minutes_before_close"></p>
-      </div>
-      <div class="field">
-        <label for="f-late">No new buys after</label>
-        <div class="unit"><input id="f-late" name="no_new_buys_minutes_before_close" type="number" min="0" max="389" step="1"><span>min before close</span></div>
-        <p class="help" data-mt-for="no_new_buys_minutes_before_close"></p>
-      </div>
-      <p class="help span2">Buying starts the moment a pick list is confirmed, but only inside this
-        window. Half days move it earlier with the early close.</p>
-    </div>
-  </section>
-
-  <section class="card scard" id="s-buying">
-    <div class="scard-head"><h2>What it buys</h2></div>
-    <div class="grid2">
-      <div class="field">
-        <label for="f-budget">Total budget</label>
-        <div class="unit pre"><span>$</span><input id="f-budget" name="total_budget" type="number" min="1" step="1"></div>
-        <p class="help">The most everything open may cost together, yesterday&rsquo;s positions included (at ask &times; 100).</p>
-      </div>
-      <div class="field">
-        <label for="f-cap">Per-pick cap</label>
-        <div class="unit pre"><span>$</span><input id="f-cap" name="max_dollars_per_position" type="number" min="1" step="1"></div>
-        <p class="help">A pick costing more than this is skipped.</p>
-      </div>
-      <div class="field">
-        <label for="f-qty">Contracts per pick</label>
-        <input id="f-qty" name="contracts_per_pick" type="number" min="1" max="100" step="1">
-      </div>
-      <div class="field">
-        <label for="f-rank">Buy first</label>
-        <select id="f-rank" name="rank_delta_source">
-          <option value="schwab_live">Highest Schwab delta (live)</option>
-          <option value="tvt">Highest TVT delta (from the list)</option>
-        </select>
-      </div>
-    </div>
-    <div class="subsection">
-      <label class="switch"><input type="checkbox" name="delta_enabled"><span class="slider" aria-hidden="true"></span>
-        Skip picks outside a delta range</label>
-      <p class="help">Off: every pick on the list is eligible (the list is treated as already screened).</p>
-      <div class="grid3" id="delta-fields">
-        <div class="field">
-          <label for="f-dsrc">Delta column</label>
-          <select id="f-dsrc" name="delta_source">
-            <option value="schwab">Schwab (0&ndash;1)</option>
-            <option value="tvt">TVT (0&ndash;100)</option>
-          </select>
-        </div>
-        <div class="field"><label for="f-dmin">Lowest |delta|</label><input id="f-dmin" name="delta_min_abs_delta" type="number" min="0" step="any"></div>
-        <div class="field"><label for="f-dmax">Highest |delta|</label><input id="f-dmax" name="delta_max_abs_delta" type="number" min="0" step="any"></div>
-      </div>
-    </div>
-  </section>
-
-  <section class="card scard" id="s-selling">
-    <div class="scard-head"><h2>When it sells</h2></div>
-    <p class="help">Whichever rule fires first sells. Take-profit can sell the same day; otherwise the
-      position is held to the next trading day.</p>
-    <div class="grid3">
-      <div class="field">
-        <label for="f-tp">Take profit</label>
-        <div class="unit"><input id="f-tp" name="take_profit_pct" data-pct type="number" min="1" max="99.9" step="1"><span>% up</span></div>
-      </div>
-      <div class="field">
-        <label for="f-sl">Hard stop</label>
-        <div class="unit"><input id="f-sl" name="hard_stop_loss_pct" data-pct type="number" min="1" max="99.9" step="1"><span>% down</span></div>
-      </div>
-      <div class="field">
-        <label for="f-ts">Trailing stop</label>
-        <div class="unit"><input id="f-ts" name="trailing_stop_pct" data-pct type="number" min="1" max="99.9" step="1"><span>% off the high</span></div>
-      </div>
-    </div>
-    <div class="subsection">
-      <h3>10-point rule</h3>
-      <p class="help" id="profit-trail-note"></p>
-      <div class="grid2">
-        <div class="field">
-          <label for="f-pts">Sell when profit falls</label>
-          <div class="unit"><input id="f-pts" name="profit_trail_points" type="number" min="0.5" max="99" step="0.5" placeholder="off"><span>points below its best</span></div>
-        </div>
-        <div class="field">
-          <label for="f-arm">Starts working</label>
-          <select id="f-arm" name="profit_trail_arm">
-            <option value="from_entry">From purchase (a stop before any gain)</option>
-            <option value="in_profit">Only once it has been in profit</option>
-          </select>
-        </div>
-      </div>
-    </div>
-    <div class="subsection">
-      <h3>Holding overnight</h3>
-      <label class="switch"><input type="checkbox" name="stops_on_entry_day"><span class="slider" aria-hidden="true"></span>
-        Stops also protect a position on the day it&rsquo;s bought</label>
-      <label class="switch"><input type="checkbox" name="next_day_time_exit"><span class="slider" aria-hidden="true"></span>
-        Sell anything still open on the next trading day</label>
-      <div class="grid2">
-        <div class="field">
-          <label for="f-sellby">Next day, sell by</label>
-          <input id="f-sellby" name="next_day_sell_by" type="time">
-          <p class="help">Mountain time. Cooper: sold before 10:00 AM.</p>
-        </div>
-        <div class="field">
-          <label for="f-held">Next-day watching starts</label>
-          <input id="f-held" name="held_exit_start" type="text" spellcheck="false">
-          <p class="help"><code>open</code>, a New York time like <code>10:00</code>, or minutes before the close.</p>
-        </div>
-        <div class="field">
-          <label for="f-ref">Gains and losses measured from</label>
-          <select id="f-ref" name="exit_reference_price">
-            <option value="mid_at_entry">The mid at purchase (recommended)</option>
-            <option value="fill">The price paid (the ask)</option>
-          </select>
-          <p class="help">From the mid, a wide bid&ndash;ask gap isn&rsquo;t an instant loss.</p>
-        </div>
-      </div>
-    </div>
-    <details class="subsection">
-      <summary>Older 10% stops</summary>
-      <p class="help" id="ambiguous-note"></p>
-      <div class="grid2">
-        <div class="field">
-          <label for="f-cp">Drop from the high</label>
-          <div class="unit"><input id="f-cp" name="cooper_drop_from_peak_pct" data-pct type="number" min="1" max="99.9" step="1" placeholder="off"><span>%</span></div>
-        </div>
-        <div class="field">
-          <label for="f-ce">Drop from purchase</label>
-          <div class="unit"><input id="f-ce" name="cooper_drop_from_entry_pct" data-pct type="number" min="1" max="99.9" step="1" placeholder="off"><span>%</span></div>
-        </div>
-      </div>
-    </details>
-  </section>
-
-  <section class="card scard" id="s-unfilled">
-    <div class="scard-head"><h2>Unfilled sells</h2></div>
-    <p class="help">A real sell that hasn&rsquo;t filled is moved to the current bid (only ever lower, never
-      a market order). After the last try you get an alert.</p>
-    <div class="grid2">
-      <div class="field">
-        <label for="f-rpa">Move the price after</label>
-        <div class="unit"><input id="f-rpa" name="exit_reprice_after_seconds" type="number" min="10" max="3600" step="5"><span>seconds</span></div>
-      </div>
-      <div class="field">
-        <label for="f-rpm">At most</label>
-        <div class="unit"><input id="f-rpm" name="exit_reprice_max_attempts" type="number" min="0" max="20" step="1"><span>times (0 = off)</span></div>
-      </div>
-    </div>
-  </section>
-
-  <section class="card scard" id="s-advanced">
-    <details>
-      <summary><h2 class="inline-h">Advanced</h2></summary>
-      <h3>Exit windows</h3>
-      <p class="help">When exits are checked on the day of purchase, per kind of ticker. Each end is a New
-        York time (<code>15:35</code> = 1:35 PM MT) or minutes before the close.</p>
-      <div id="exit-window-rows"></div>
-      <div class="grid2">
-        <div class="field">
-          <label for="f-poll">Check prices every</label>
-          <div class="unit"><input id="f-poll" name="poll_interval_seconds" type="number" min="1" step="1"><span>seconds</span></div>
-        </div>
-      </div>
-      <p class="hint" id="rules-path"></p>
-    </details>
-  </section>
-
-  <div class="savebar" id="savebar" role="region" hidden aria-label="Save settings">
-    <span id="dirty" class="dirty" hidden>Unsaved changes</span>
-    <span id="rules-msg" class="msg" role="status"></span>
-    <button type="button" id="btn-restart-run" class="btn btn-primary" hidden>Restart the run with these</button>
-    <button type="button" id="btn-reload" class="btn">Discard</button>
-    <button type="submit" class="btn btn-primary">Save settings</button>
   </div>
-</form>
-
-<section class="card scard" id="alerts-card">
-  <div class="scard-head"><h2>Alerts</h2></div>
-  <p class="help">When something needs you (a sell that failed or isn&rsquo;t filling, an order Schwab may
-    not have received, the Schwab login running out, a run that stopped with an error), the app sends a
-    push to your phone through ntfy (and a Mac notification on a Mac). Alerts never include account
-    numbers or dollar amounts.</p>
-  <ul id="alert-channels" class="plain-list"></ul>
-  <div class="row">
-    <button type="button" id="btn-test-alert" class="btn">Send test alert</button>
-    <span id="alert-msg" class="msg" role="status"></span>
-  </div>
-  <h3>Recent alerts</h3>
-  <ul id="alert-recent" class="plain-list"><li class="hint">None since the app started.</li></ul>
-</section>
+</div>
 {% endblock %}
 {% block script %}<script src="{{ url_for('static', filename='settings.js') }}"></script>{% endblock %}

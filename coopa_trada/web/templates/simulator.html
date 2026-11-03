@@ -1,16 +1,20 @@
 {% extends "base.html" %}
 {% block title %} &middot; Simulator{% endblock %}
 {% block content %}
+<div class="page-head">
+  <div>
+    <h1>Simulator</h1>
+    <p class="hint">Replay a pick list on any day with this bot&rsquo;s settings and pretend orders. Nothing is
+      sent to Schwab and the trade log is not touched.</p>
+  </div>
+  <span class="tip" data-tip="It runs the real buying and selling code, the same rules and order handling as a real run, against a pretend Schwab on a fake clock, in its own process so it can never disturb the real bot."></span>
+</div>
 <section class="card">
-  <h1>Simulator</h1>
-  <p class="hint">Replays a pick list on the days and times you choose, with this bot&rsquo;s own
-    settings, the real buying and selling code, a pretend Schwab and a fake clock. Nothing is sent
-    to Schwab and the trade log is not touched. For debugging.</p>
 
   <fieldset>
     <legend>1. The picks</legend>
     <div class="row">
-      <label class="inline">Start from
+      <label class="inline" data-tip="This bot's confirmed lists, lists you saved as seeds, or made-up examples">Start from
         <select id="sim-list"><option value="">loading&hellip;</option></select>
       </label>
       <span id="sim-list-info" class="hint"></span>
@@ -29,8 +33,8 @@
     <legend>2. When</legend>
     <div class="sim-grid">
       <label class="block">Buy date<input id="sim-buy-day" type="date"></label>
-      <label class="block">List confirmed at (MT)<input id="sim-confirm" type="time" value="13:40"></label>
-      <label class="block">Simulation starts at (MT)<input id="sim-start" type="time" value="13:00"></label>
+      <label class="block" data-tip="When the pretend Confirm is pressed. The bot buys at once if it's inside the buying window (1:30–1:57 PM MT by default).">List confirmed at (MT)<input id="sim-confirm" type="time" value="13:40"></label>
+      <label class="block" data-tip="When the pretend clock starts on the buy date">Simulation starts at (MT)<input id="sim-start" type="time" value="13:00"></label>
       <label class="block">Ends on<input id="sim-end-day" type="date">
         <span class="hint">Blank = the next trading day</span></label>
       <label class="block">Ends at (MT)<input id="sim-end" type="time" value="10:00"></label>
@@ -52,7 +56,7 @@
       <div class="row">
         <label class="inline">Every pick
           <select id="sim-shape"></select></label>
-        <label class="inline">Random seed <input id="sim-seed" type="number" value="1" min="0" style="width:80px"></label>
+        <label class="inline" data-tip="The same seed gives the same random-walk prices every time">Random seed <input id="sim-seed" type="number" value="1" min="0" style="width:80px"></label>
       </div>
       <details>
         <summary>Shape per pick</summary>
@@ -60,7 +64,7 @@
       </details>
     </div>
     <div class="row">
-      <label class="inline">Bid&ndash;ask spread <input id="sim-spread" type="number" value="6" min="0" max="50" step="0.5" style="width:70px">%</label>
+      <label class="inline" data-tip="The gap between the bid and the ask as a share of the price. Buys pay the ask; sells get the bid.">Bid&ndash;ask spread <input id="sim-spread" type="number" value="6" min="0" max="50" step="0.5" style="width:70px">%</label>
       <label class="inline"><input id="sim-stuck" type="checkbox"> First sell order doesn&rsquo;t fill (tests repricing; the bot only lowers the price, so it reprices once the bid drops)</label>
     </div>
   </fieldset>
@@ -92,12 +96,16 @@
         <option value="300">300&times;</option>
         <option value="1800">1800&times;</option>
       </select></label>
-    <label class="inline"><input id="pb-skip" type="checkbox" checked> skip quiet stretches</label>
+    <label class="inline" data-tip="Jump ahead when nothing is held and nothing is about to happen"><input id="pb-skip" type="checkbox" checked> skip quiet stretches</label>
+    <span class="hint" style="margin-left:auto">Space plays/pauses &middot; &larr; &rarr; step</span>
   </div>
   <input id="pb-scrub" type="range" min="0" value="0" class="scrub" aria-label="Simulated time">
   <div class="pb-clock"><span id="pb-time">&mdash;</span> <span id="pb-note" class="hint"></span></div>
   <div id="pb-summary" class="pb-summary"></div>
   <h3>Positions</h3>
+  <div class="legend"><span><i class="l-price"></i>price (mid)</span><span><i class="l-tp"></i>take profit</span>
+    <span><i class="l-stop"></i>nearest stop</span><span><i class="l-dot" style="background:var(--accent)"></i>bought</span>
+    <span><i class="l-dot" style="background:var(--warn)"></i>sold</span></div>
   <div id="pb-picks" class="pick-cards"></div>
   <details id="pb-unbought-wrap">
     <summary id="pb-unbought-title">Not bought</summary>

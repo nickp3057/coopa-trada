@@ -79,6 +79,11 @@ function runLine(b) {
 
 function render(b) {
   const [text, cls] = headline(b);
+  const done = b.picks.filter((p) => p.state === "bought" || p.state === "sold").length;
+  CT.tile("tile-picks", !b.trading_day ? { value: "Market closed", sub: dayText(b.day), cls: "" }
+    : b.list_loaded ? { value: `${b.picks.length} loaded`, cls: "ok",
+      sub: (b.confirmed_at ? "Confirmed " + clockMT(b.confirmed_at) : "Confirmed") + (done ? ` · ${done} bought` : "") }
+      : { value: "Not loaded yet", sub: "Usually arrives 1:40–1:55 PM MT", cls: b.list_error || b.other_list ? "bad" : "warn" });
   todayHeadline.textContent = text;
   todayHeadline.className = "status-line " + cls;
   const [run, runCls] = runLine(b);

@@ -1,35 +1,41 @@
 {% extends "base.html" %}
 {% block title %} &middot; Trade log{% endblock %}
 {% block content %}
-<section class="card">
-  <div class="row spread">
+<div class="page-head">
+  <div>
     <h1>Trade log</h1>
-    <div class="row">
-      <button id="btn-refresh" class="btn">Refresh</button>
-      <button id="btn-clear" class="btn">Clear practice log</button>
-    </div>
+    <p class="hint">One row per position: what was bought, when, for how much, and why it was sold.</p>
   </div>
-  <div id="clear-confirm" class="alert" hidden>
-    <p>Delete every <strong>practice</strong> trade from the log? This can&rsquo;t be undone.
-      Real-money trades are never deleted. Confirmed pick lists are kept.</p>
-    <div class="row">
-      <button id="btn-clear-yes" class="btn btn-danger">Yes, clear practice trades</button>
-      <button id="btn-clear-no" class="btn" type="button">Cancel</button>
-    </div>
+  <div class="row-tight">
+    <button id="btn-refresh" class="btn" data-tip="Load the latest trades">Refresh</button>
+    <button id="btn-clear" class="btn" data-tip="Delete every practice trade (real-money trades are never deleted)">Clear practice log</button>
   </div>
-  <p id="clear-msg" class="msg" role="status"></p>
-  <p class="hint">One row per position. Point&#8209;in&#8209;time snapshot of the same
-    <code>orders</code> / <code>fills</code> / <code>exit_events</code> the engine writes.</p>
+</div>
+<div id="clear-confirm" class="alert alert-warn" hidden>
+  <p>Delete every <strong>practice</strong> trade from the log? This can&rsquo;t be undone.
+    Real-money trades are never deleted. Confirmed pick lists are kept.</p>
+  <div class="row">
+    <button id="btn-clear-yes" class="btn btn-danger">Yes, clear practice trades</button>
+    <button id="btn-clear-no" class="btn" type="button">Cancel</button>
+  </div>
+</div>
+<p id="clear-msg" class="msg" role="status"></p>
+<section class="card">
   <div id="trades-summary" class="summary"></div>
   <div class="table-wrap">
     <table id="trades-table">
       <thead>
         <tr>
-          <th>Symbol</th><th>Contract</th>
-          <th>Entry time</th><th class="num">Entry</th>
-          <th>Exit time</th><th class="num">Exit</th>
-          <th class="num">Qty</th><th class="num">P&amp;L</th>
-          <th>Exit reason</th><th>Mode</th>
+          <th>Symbol</th>
+          <th data-tip="The exact option (Schwab's symbol: ticker, expiration, call/put, strike)">Contract</th>
+          <th>Entry time</th>
+          <th class="num" data-tip="Price paid per share (×100 for the dollar cost)">Entry</th>
+          <th>Exit time</th>
+          <th class="num" data-tip="Price received per share">Exit</th>
+          <th class="num">Qty</th>
+          <th class="num" data-tip="(exit − entry) × 100 × quantity">P&amp;L</th>
+          <th data-tip="Which rule sold it, and the numbers behind it">Exit reason</th>
+          <th data-tip="PRACTICE: pretend orders. LIVE: real orders at Schwab.">Mode</th>
         </tr>
       </thead>
       <tbody><tr><td colspan="10">loading&hellip;</td></tr></tbody>

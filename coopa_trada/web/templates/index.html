@@ -3,32 +3,93 @@
 {% block content %}
 <div id="schwab-banner" class="alert" role="alert" hidden></div>
 <div id="attention-banner" class="alert alert-error" role="alert" hidden></div>
-<section class="card" id="today-card">
-  <h2>Today&rsquo;s picks</h2>
-  <p id="today-headline" class="status-line">checking&hellip;</p>
-  <p id="today-run" class="status-line"></p>
-  <div id="today-picks" class="table-wrap"></div>
-  <div id="today-held" hidden>
-    <h3>Held from earlier days</h3>
-    <div id="today-held-table" class="table-wrap"></div>
+
+<div class="tiles" aria-label="At a glance">
+  <a class="tile" id="tile-run" href="#run-card" data-tip="Whether today's run is going. It starts by itself at 7:00 AM MT on trading days and buys the list once it is confirmed.">
+    <div class="tile-label">Today&rsquo;s run</div><div class="tile-value">&hellip;</div><div class="tile-sub"></div></a>
+  <a class="tile" id="tile-picks" href="#today-card" data-tip="Whether today's pick list is loaded and confirmed. Cooper's list usually arrives 1:40–1:55 PM MT.">
+    <div class="tile-label">Today&rsquo;s picks</div><div class="tile-value">&hellip;</div><div class="tile-sub"></div></a>
+  <a class="tile" id="tile-schwab" href="#schwab-card" data-tip="Schwab makes you log in again every 7 days. Real orders and real prices need this connected.">
+    <div class="tile-label">Schwab login</div><div class="tile-value">&hellip;</div><div class="tile-sub"></div></a>
+  <a class="tile" id="tile-money" href="#live-panel" data-tip="Off: every run is practice and nothing is sent to Schwab. On: runs place real orders.">
+    <div class="tile-label">Money</div><div class="tile-value">&hellip;</div><div class="tile-sub"></div></a>
+</div>
+
+<div class="grid-main">
+  <section class="card" id="today-card">
+    <div class="card-head">
+      <h2>Today&rsquo;s picks</h2>
+      <a class="btn btn-small" href="/trades" data-tip="Every sold pick with its profit or loss">Trade log &rarr;</a>
+    </div>
+    <p id="today-headline" class="status-line">checking&hellip;</p>
+    <p id="today-run" class="status-line"></p>
+    <div id="today-picks" class="table-wrap"></div>
+    <div id="today-held" hidden>
+      <h3>Held from earlier days</h3>
+      <div id="today-held-table" class="table-wrap"></div>
+    </div>
+  </section>
+
+  <section class="card" id="run-card">
+    <div class="card-head">
+      <h2>Run</h2>
+      <span class="tip" data-tip="The run watches positions held from yesterday from the open, then buys the confirmed list inside the buying window (1:30–1:57 PM MT unless changed in Settings). It starts by itself at 7:00 AM MT; Start is for starting it by hand."></span>
+    </div>
+    <div id="run-status" class="status-line">status &hellip;</div>
+    <p id="awake-status" class="status-line" hidden></p>
+    <div class="row">
+      <button id="btn-start" class="btn btn-primary" data-tip="Start today's run now (practice unless Real money is on)">Start today&rsquo;s practice run</button>
+      <button id="btn-stop" class="btn" disabled data-tip="Stop the run. Open positions stay open and are not watched until a run starts again.">Stop</button>
+    </div>
+    <label class="inline" id="run-date-label" data-tip="Practice only: replay another day's list. Leave as today for a normal run.">
+      Date <input id="run-date" type="date">
+    </label>
+    <p class="hint" id="start-mode-hint">Real money is off, so every run is practice: nothing is sent to Schwab.</p>
+    <div id="lock-panel" class="alert alert-error" hidden>
+      <p id="lock-text"></p>
+      <p class="hint">Before clearing: open the Reconcile page (or Schwab) and check for open
+        orders or positions the stopped run may have left.</p>
+      <button id="btn-clear-lock" class="btn">Clear stale lock</button>
+    </div>
+    <details class="quiet">
+      <summary>Technical details</summary>
+      <pre id="banner" class="banner">loading&hellip;</pre>
+    </details>
+  </section>
+</div>
+
+<section class="card" id="watch-card" hidden style="margin-top:16px">
+  <div class="card-head">
+    <h2>Watching now</h2>
+    <span class="row-tight"><span class="hint" id="watch-updated"></span>
+      <a class="btn btn-small" href="/activity" data-tip="The full log of everything the bot did">Activity &rarr;</a></span>
   </div>
-  <p class="hint">Updates on its own. Sold picks and their profit or loss are also on the
-    <a href="/trades">Trade log</a>.</p>
+  <p class="hint">Each open position, its latest price, and the price at which each rule would sell it.
+    The highlighted stop would fire first.</p>
+  <div id="watch" class="pick-cards"></div>
 </section>
-<section class="card" id="telegram-card" hidden>
-  <h2>Picks sent by Telegram</h2>
-  <p class="hint">Lists forwarded to the Telegram bot wait here as well as in Telegram.
-    Confirm in either place. Nothing is bought until a list is confirmed.</p>
+
+<section class="card" id="telegram-card" hidden style="margin-top:16px">
+  <div class="card-head">
+    <h2>Picks sent by Telegram</h2>
+    <span class="tip" data-tip="Lists forwarded to the Telegram bot wait here and in Telegram. Confirm in either place. Nothing is bought until a list is confirmed."></span>
+  </div>
   <div id="telegram-pending"></div>
   <p id="telegram-msg" class="msg" role="status"></p>
 </section>
-<section class="card">
-  <h1>Upload your picks</h1>
-  <p class="hint">Upload Cooper’s CSV or a screenshot of the five-column table. Check every contract and the full dates before selecting the list.</p>
-  <div class="row"><input id="picks-file" type="file" accept=".csv,.jpg,.jpeg,.png" aria-label="Picks file"><button id="picks-upload" class="btn">Read file</button></div>
-  <div class="row">
-    <label>Trade date <input id="picks-date" type="date" required></label>
-    <label>Expiration <input id="picks-expiration" type="date" required></label>
+
+<section class="card" style="margin-top:16px">
+  <div class="card-head">
+    <h2>Upload picks</h2>
+    <span class="tip" data-tip="Upload Cooper's CSV or a screenshot of the five-column table. The bot reads it; check every row against the picture, then confirm. Confirming during the buying window buys straight away."></span>
+  </div>
+  <div class="dropzone">
+    <div class="row" style="margin-top:0"><input id="picks-file" type="file" accept=".csv,.jpg,.jpeg,.png" aria-label="Picks file">
+      <button id="picks-upload" class="btn" data-tip="Read the picks from the file">Read file</button></div>
+    <div class="row" style="margin-bottom:0">
+      <label class="inline" data-tip="The day these picks are for. A list is only bought on its trade date.">Trade date <input id="picks-date" type="date" required></label>
+      <label class="inline" data-tip="The options' expiration date (one date for the whole list)">Expiration <input id="picks-expiration" type="date" required></label>
+    </div>
   </div>
   <div class="check-area">
     <figure id="picks-figure" class="picks-figure" hidden>
@@ -41,94 +102,70 @@
       <div class="row"><button id="picks-add-row" class="btn" type="button" hidden>Add a row</button></div>
     </div>
   </div>
-  <details class="raw-text">
+  <details class="raw-text quiet">
     <summary>Raw text (advanced)</summary>
     <label class="block" for="picks-csv">The same picks as text; the table and this box stay in step</label>
     <textarea id="picks-csv" rows="8" spellcheck="false" placeholder="SYMBOL,OPTION,LAST PRICE,TVT-DELTA,SCHWAB DELTA"></textarea>
   </details>
-  <div class="row"><button id="picks-preview" class="btn">Preview picks</button><button id="picks-confirm" class="btn btn-primary" disabled>Confirm and select these picks</button></div>
+  <div class="row">
+    <button id="picks-preview" class="btn" data-tip="Check the list: which contracts it is, and anything the bot can't read">Preview picks</button>
+    <button id="picks-confirm" class="btn btn-primary" disabled data-tip="Make this today's list. A running run buys it at once inside the buying window.">Confirm and select these picks</button>
+  </div>
   <p id="picks-message" role="status"></p>
   <div id="picks-table" class="table-wrap"></div>
 </section>
-<section class="card">
-  <h1>Run control</h1>
-  <pre id="banner" class="banner">loading&hellip;</pre>
-  <div class="row">
-    <div id="run-status" class="status-line">status &hellip;</div>
-  </div>
-  <p id="awake-status" class="status-line" hidden></p>
-  <div class="row">
-    <button id="btn-start" class="btn btn-primary">Start today&rsquo;s practice run</button>
-    <button id="btn-stop" class="btn" disabled>Stop</button>
-    <label class="inline" id="run-date-label">
-      Date <input id="run-date" type="date" title="defaults to today (market tz)">
-    </label>
-  </div>
-  <div id="lock-panel" class="alert alert-error" hidden>
-    <p id="lock-text"></p>
-    <p class="hint">Before clearing: open the Reconcile page (or Schwab) and check for open
-      orders or positions the stopped run may have left.</p>
-    <button id="btn-clear-lock" class="btn">Clear stale lock</button>
-  </div>
-  <p class="hint">Start the day&rsquo;s run before Cooper&rsquo;s picks arrive (they come
-    1:40&ndash;1:55 PM Mountain), ideally before the market opens so positions held from
-    yesterday are watched from the open. The run buys as soon as a list is confirmed here or
-    in Telegram, inside the buying window shown in Settings. All times are Mountain.</p>
-  <p class="hint" id="start-mode-hint">Real money is off, so every run is practice: nothing is sent
-    to Schwab.</p>
-</section>
 
-<section class="card danger" id="live-panel">
-  <div class="scard-head">
-    <h2>Real money</h2>
-    <label class="switch"><input type="checkbox" id="live-switch" aria-describedby="live-switch-help"><span class="slider" aria-hidden="true"></span>
-      <span id="live-switch-label">Off</span></label>
-  </div>
-  <p class="hint" id="live-switch-help">Off: every run is practice and nothing is sent to Schwab. On: the
-    7:00 AM automatic run and the Start button place <strong>real orders</strong> in your Schwab
-    account. Turning it off is one click.</p>
-  <div id="live-arm" class="live-arm" hidden>
-    <label class="block" for="live-confirm">To turn real money on, type <strong id="live-phrase">ENABLE LIVE TRADING</strong></label>
-    <input id="live-confirm" type="text" autocomplete="off" spellcheck="false" autocapitalize="characters">
-    <div class="row">
-      <button id="btn-live-on" class="btn btn-danger" disabled>Turn real money on</button>
-      <button id="btn-live-cancel" class="btn" type="button">Cancel</button>
+<p class="section-label">Account and money</p>
+<div class="grid-half">
+  <section class="card" id="schwab-card">
+    <div class="card-head">
+      <h2>Schwab connection</h2>
+      <span id="schwab-state" class="state-pill">checking&hellip;</span>
     </div>
-  </div>
-  <p id="live-msg" class="msg" role="status"></p>
-  <h3>Real orders need</h3>
-  <ul id="live-checks" class="checklist"><li class="hint">checking&hellip;</li></ul>
-  <details>
-    <summary>What a real run trades with</summary>
-    <div id="live-settings" class="status-line">checking settings&hellip;</div>
-  </details>
-</section>
+    <p id="schwab-countdown" class="hint"></p>
+    <p id="token-status" class="status-line"></p>
+    <button id="btn-reconnect" class="btn" data-tip="Log in to Schwab again (needed every 7 days)">Reconnect Schwab</button>
+    <div id="reconnect-steps" hidden>
+      <ol class="steps">
+        <li><a id="reconnect-link" href="#" target="_blank" rel="noopener">Open the Schwab login page</a>
+          (opens a new tab). Log in and click <strong>Allow</strong>.</li>
+        <li>Schwab then sends that tab to an address starting with
+          <code id="reconnect-callback"></code>. The page will say it can&rsquo;t be reached
+          or show a security warning. That is expected.</li>
+        <li>Copy the <em>whole</em> address from that tab&rsquo;s address bar, paste it here,
+          and click Finish. Do this straight away: the code in it only lasts a short time.</li>
+      </ol>
+      <input id="reconnect-url" type="text" autocomplete="off" spellcheck="false"
+        placeholder="https://127.0.0.1:8182/?code=..." aria-label="Address after clicking Allow">
+      <div class="row"><button id="btn-reconnect-finish" class="btn btn-primary">Finish</button></div>
+    </div>
+    <p id="reconnect-msg" class="msg" role="status"></p>
+  </section>
 
-<section class="card" id="schwab-card">
-  <h2>Schwab connection</h2>
-  <div class="row">
-    <span id="schwab-state" class="state-pill">Schwab: checking&hellip;</span>
-    <span id="schwab-countdown" class="hint"></span>
-  </div>
-  <p id="token-status" class="status-line"></p>
-  <p class="hint">Schwab makes you log in again every 7 days. The bot can only use
-    Schwab while this says Connected or Expiring soon.</p>
-  <button id="btn-reconnect" class="btn">Reconnect Schwab</button>
-  <div id="reconnect-steps" hidden>
-    <ol class="steps">
-      <li><a id="reconnect-link" href="#" target="_blank" rel="noopener">Open the Schwab login page</a>
-        (opens a new tab). Log in and click <strong>Allow</strong>.</li>
-      <li>Schwab then sends that tab to an address starting with
-        <code id="reconnect-callback"></code>. The page will say it can&rsquo;t be reached
-        or show a security warning. That is expected.</li>
-      <li>Copy the <em>whole</em> address from that tab&rsquo;s address bar, paste it here,
-        and click Finish. Do this straight away: the code in it only lasts a short time.</li>
-    </ol>
-    <input id="reconnect-url" type="text" autocomplete="off" spellcheck="false"
-      placeholder="https://127.0.0.1:8182/?code=..." aria-label="Address after clicking Allow">
-    <div class="row"><button id="btn-reconnect-finish" class="btn btn-primary">Finish</button></div>
-  </div>
-  <p id="reconnect-msg" class="msg" role="status"></p>
-</section>
+  <section class="card danger" id="live-panel">
+    <div class="card-head">
+      <h2>Real money</h2>
+      <label class="switch" data-tip="Turning on takes a typed confirmation. Turning off is one click."><input type="checkbox" id="live-switch" aria-describedby="live-switch-help"><span class="slider" aria-hidden="true"></span>
+        <span id="live-switch-label">Off</span></label>
+    </div>
+    <p class="hint" id="live-switch-help">Off: every run is practice and nothing is sent to Schwab. On: the
+      7:00 AM automatic run and the Start button place <strong>real orders</strong> in your Schwab account.</p>
+    <div id="live-arm" class="live-arm" hidden>
+      <label class="block" for="live-confirm">To turn real money on, type <strong id="live-phrase">ENABLE LIVE TRADING</strong></label>
+      <input id="live-confirm" type="text" autocomplete="off" spellcheck="false" autocapitalize="characters">
+      <div class="row">
+        <button id="btn-live-on" class="btn btn-danger" disabled>Turn real money on</button>
+        <button id="btn-live-cancel" class="btn" type="button">Cancel</button>
+      </div>
+    </div>
+    <p id="live-msg" class="msg" role="status"></p>
+    <h3>Real orders need</h3>
+    <ul id="live-checks" class="checklist"><li class="hint">checking&hellip;</li></ul>
+    <details class="quiet">
+      <summary>What a real run trades with</summary>
+      <div id="live-settings" class="status-line">checking settings&hellip;</div>
+    </details>
+  </section>
+</div>
 {% endblock %}
-{% block script %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script><script src="{{ url_for('static', filename='imports.js') }}"></script><script src="{{ url_for('static', filename='telegram.js') }}"></script><script src="{{ url_for('static', filename='today.js') }}"></script>{% endblock %}
+{% block script %}<script src="{{ url_for('static', filename='dashboard.js') }}"></script><script src="{{ url_for('static', filename='imports.js') }}"></script><script src="{{ url_for('static', filename='telegram.js') }}"></script><script src="{{ url_for('static', filename='today.js') }}"></script><script src="{{ url_for('static', filename='watch.js') }}"></script>{% endblock %}

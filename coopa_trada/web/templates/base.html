@@ -4,21 +4,24 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Coopa Trada{% block title %}{% endblock %}</title>
+  <script>try { var t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
 </head>
 <body data-page="{{ page }}">
   <header class="topbar">
-    <div class="brand">COOPA&nbsp;TRADA</div>
-    <div id="mode-pill" class="mode-pill mode-unknown">MODE&nbsp;&hellip;</div>
-    <nav class="nav">
-      <a href="{{ url_for('ui.index') }}" class="{{ 'active' if page == 'dashboard' }}">Dashboard</a>
-      <a href="{{ url_for('ui.settings_page') }}" class="{{ 'active' if page == 'settings' }}">Settings</a>
-      <a href="{{ url_for('ui.trades_page') }}" class="{{ 'active' if page == 'trades' }}">Trade log</a>
-      <a href="{{ url_for('ui.reconcile_page') }}" class="{{ 'active' if page == 'reconcile' }}">Reconcile</a>
-      <a href="{{ url_for('sim.activity_page') }}" class="{{ 'active' if page == 'activity' }}">Activity</a>
-      <a href="{{ url_for('sim.sim_page') }}" class="{{ 'active' if page == 'simulator' }}">Simulator</a>
-      {% if gateway_user %}<a href="/logout" title="Log out">{{ gateway_user }} &middot; Log out</a>{% endif %}
+    <a class="brand" href="{{ url_for('ui.index') }}"><span class="brand-mark" aria-hidden="true">CT</span>COOPA&nbsp;TRADA</a>
+    <div id="mode-pill" class="mode-pill mode-unknown" data-tip="PRACTICE: nothing is sent to Schwab. REAL MONEY: runs place real orders.">MODE&nbsp;&hellip;</div>
+    <nav class="nav" aria-label="Pages">
+      <a href="{{ url_for('ui.index') }}" class="{{ 'active' if page == 'dashboard' }}" data-tip="Today's picks, the run, uploads, Schwab and the Real money switch">Dashboard</a>
+      <a href="{{ url_for('sim.activity_page') }}" class="{{ 'active' if page == 'activity' }}" data-tip="What the bot is watching right now, and everything it has done (kept a year)">Activity</a>
+      <a href="{{ url_for('ui.trades_page') }}" class="{{ 'active' if page == 'trades' }}" data-tip="Every position bought and sold, with profit or loss">Trade log</a>
+      <a href="{{ url_for('ui.settings_page') }}" class="{{ 'active' if page == 'settings' }}" data-tip="When it buys, what it buys, when it sells">Settings</a>
+      <span class="nav-sep" aria-hidden="true"></span>
+      <a href="{{ url_for('sim.sim_page') }}" class="{{ 'active' if page == 'simulator' }}" data-tip="Replay a pick list on any day with pretend orders, for debugging">Simulator</a>
+      <a href="{{ url_for('ui.reconcile_page') }}" class="{{ 'active' if page == 'reconcile' }}" data-tip="Compare the bot's records with Schwab; resolve unclear orders">Reconcile</a>
+      {% if gateway_user %}<a href="/logout" data-tip="Log out of the Coopa Trada website">{{ gateway_user }} &middot; Log out</a>{% endif %}
     </nav>
+    <button id="theme-btn" class="theme-btn" type="button" data-tip="Light, dark, or follow this device">Auto</button>
   </header>
   <main class="container">
     {% block content %}{% endblock %}

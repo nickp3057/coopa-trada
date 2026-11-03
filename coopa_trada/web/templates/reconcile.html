@@ -1,19 +1,25 @@
 {% extends "base.html" %}
 {% block title %} &middot; Reconcile{% endblock %}
 {% block content %}
+<div class="page-head">
+  <div>
+    <h1>Reconcile</h1>
+    <p class="hint">Compare the bot&rsquo;s records with Schwab. Schwab is always treated as the truth.</p>
+  </div>
+</div>
 <section class="card danger" id="attention-card" hidden>
-  <h1>Orders that need your attention</h1>
+  <h2>Orders that need your attention</h2>
   <p class="hint">The bot could not confirm these orders with Schwab and did <strong>not</strong>
     resend them. For each one, look at Orders in your Schwab account (app or website), then
     record what you found. A contract marked &ldquo;outcome unknown&rdquo; stays halted until you do.</p>
   <div id="attention-list"></div>
 </section>
 <section class="card">
-  <h1>Reconcile</h1>
-  <p class="hint">Compares local state against Schwab. Schwab is treated as the
-    source of truth. In DRY&#8209;RUN (no <code>LIVE_TRADING=1</code>) this is a
-    no&#8209;op that does not contact Schwab.</p>
-  <button id="btn-reconcile" class="btn btn-primary">Run reconcile</button>
+  <div class="card-head">
+    <h2>Check against Schwab</h2>
+    <span class="tip" data-tip="Lists positions and open orders that don't match between the bot and Schwab. In practice mode (no LIVE_TRADING=1) it does nothing and does not contact Schwab."></span>
+  </div>
+  <button id="btn-reconcile" class="btn btn-primary" data-tip="Read positions and open orders from Schwab and compare (read-only)">Run reconcile</button>
   <div id="reconcile-out" class="reconcile-out"></div>
 </section>
 {% endblock %}

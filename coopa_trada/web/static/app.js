@@ -71,5 +71,87 @@ async function setupQuit() {
   });
 }
 
+// -- status tiles (dashboard) --------------------------------------------------
+// CT.tile("tile-run", { value, sub, cls: "ok" | "warn" | "bad" | "info" })
+CT.tile = function (id, { value, sub = "", cls = "" }) {
+  const tile = document.getElementById(id);
+  if (!tile) return;
+  tile.className = "tile " + cls;
+  tile.querySelector(".tile-value").textContent = value;
+  tile.querySelector(".tile-sub").textContent = sub;
+};
+
+// -- hover tips ---------------------------------------------------------------------
+// Any element with data-tip="..." shows it on hover, on keyboard focus, and on tap
+// (phones). <span class="tip" data-tip="..."></span> draws the small "i".
+(function tooltips() {
+  let box = null;
+  let owner = null;
+  function ensure() {
+    if (!box) {
+      box = document.createElement("div");
+      box.id = "tooltip";
+      box.setAttribute("role", "tooltip");
+      document.body.append(box);
+    }
+    return box;
+  }
+  function show(el) {
+    const text = el.getAttribute("data-tip");
+    if (!text) return;
+    owner = el;
+    const b = ensure();
+    b.textContent = text;
+    b.classList.add("show");
+    const r = el.getBoundingClientRect();
+    const w = b.offsetWidth, h = b.offsetHeight;
+    let left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8);
+    let top = r.top - h - 8;
+    if (top < 8) top = r.bottom + 8;
+    b.style.left = left + "px";
+    b.style.top = top + "px";
+  }
+  function hide() { owner = null; if (box) box.classList.remove("show"); }
+  const find = (t) => (t instanceof Element ? t.closest("[data-tip]") : null);
+  document.addEventListener("mouseover", (e) => { const el = find(e.target); if (el) show(el); });
+  document.addEventListener("mouseout", (e) => { if (find(e.target) && !find(e.relatedTarget)) hide(); });
+  document.addEventListener("focusin", (e) => { const el = find(e.target); if (el) show(el); });
+  document.addEventListener("focusout", hide);
+  document.addEventListener("click", (e) => {
+    const el = find(e.target);
+    if (el && el.classList.contains("tip")) { e.preventDefault(); owner === el ? hide() : show(el); }
+    else if (!el) hide();
+  });
+  window.addEventListener("scroll", hide, { passive: true });
+  document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll(".tip").forEach((t) => {
+      t.textContent = "i";
+      t.tabIndex = 0;
+      t.setAttribute("aria-label", t.getAttribute("data-tip"));
+    });
+  });
+})();
+
+// -- light / dark ---------------------------------------------------------------------
+function setupTheme() {
+  const btn = document.getElementById("theme-btn");
+  if (!btn) return;
+  const label = () => {
+    const t = document.documentElement.dataset.theme;
+    btn.textContent = t === "dark" ? "Dark" : t === "light" ? "Light" : "Auto";
+  };
+  label();
+  btn.addEventListener("click", () => {
+    const order = ["", "light", "dark"];
+    const now = document.documentElement.dataset.theme || "";
+    const next = order[(order.indexOf(now) + 1) % order.length];
+    if (next) document.documentElement.dataset.theme = next;
+    else delete document.documentElement.dataset.theme;
+    try { next ? localStorage.setItem("theme", next) : localStorage.removeItem("theme"); } catch (e) { /* private mode */ }
+    label();
+  });
+}
+
+document.addEventListener("DOMContentLoaded", setupTheme);
 document.addEventListener("DOMContentLoaded", refreshModePill);
 document.addEventListener("DOMContentLoaded", setupQuit);
