@@ -87,7 +87,7 @@ Plain-English rules with dollar examples: **docs/HOW_IT_TRADES.md**.
   skip gate. There is no position-count limit.
 - **Hold logic:** a take-profit sells the same day; otherwise the position is held to
   the next trading day, where every exit applies (from the open by default) and the
-  time exit sells at that day's exit-window end.
+  time exit sells by 9:55 AM MT (`next_day_sell_by`; Cooper: before 10 AM).
 - **Exits:** take profit, hard stop, trailing stop, Cooper's 10-point profit trail
   (profit % 10 points below its peak), the older 10%-from-peak reading, and the
   next-day time exit. First trigger wins. An unfilled real sell is repriced to the

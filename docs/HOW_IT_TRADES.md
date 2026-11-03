@@ -95,6 +95,9 @@ other choice, "the price paid", measures from the $1.00.)
 - **Stops also protect the position on the day it is bought** (hard stop, trailing
   stops, the 10-point rule). Switch this off to let only the take-profit sell on the
   day of purchase.
+- The rules watch a position **from the moment it is bought** until the end of the
+  exit window (1:58 PM MT for stocks, 1:59 PM MT for ETFs). A pick bought at 1:40 PM
+  can be sold at 1:41 PM.
 - If nothing fires by the end of the exit window, the position is **held
   overnight** and rolls to the next trading day.
 - Exception: an option that **expires today** can't be held, so it is sold at the
@@ -103,8 +106,9 @@ other choice, "the price paid", measures from the $1.00.)
 ### Next trading day
 
 Every rule applies **from the market open (7:30 AM MT)**, and anything still open is
-**sold at the end of that day's exit window** (1:58 PM MT for stocks, 1:59 PM MT for
-ETFs), so nothing is held more than one night. A Friday buy rolls to Monday; holidays
+**sold at 9:55 AM MT**, so it is out before 10:00 AM (Cooper's rule) and nothing is
+held more than one night. If the sell doesn't fill, it is repriced every minute
+(see below). A Friday buy rolls to Monday; holidays
 are skipped. If a position misses its next-day sale (for example the server was
 off), it is sold at the start of the following day's watching. (Setting: switch the
 next-day sale off to keep holding until a rule fires; an option is still sold on its
@@ -119,7 +123,7 @@ expiration day.)
 | **Hard stop** | mid is 40% below the buy price | mid falls to $0.60 |
 | **Trailing stop 25%** | mid falls 25% from its highest | highest $2.00 → sells at $1.50 |
 | **10% from the high** (older reading of the 10% rule) | mid falls 10% from its highest | highest $2.00 → sells at $1.80 |
-| **Time exit** (next trading day only) | end of the next day's exit window | 1:58 PM MT |
+| **Time exit** (next trading day only) | the next day's sell-by time | 9:55 AM MT |
 
 **The 10-point rule, more examples.** The trigger is *highest price − 10% of the buy
 price*:
@@ -180,6 +184,7 @@ and 1 filled, the new order is for the 1 that's left.
 | 10% from the high | on, 10% | another %, or off |
 | Stops on the day of purchase | yes | no (only the take-profit sells that day) |
 | Next-day watching starts | market open | a time, or minutes before the close |
-| Sell everything at the end of the next day | yes | no (hold until a rule fires) |
+| Sell everything on the next day | yes | no (hold until a rule fires) |
+| Next day, sell by | 9:55 AM MT | any Mountain time |
 | Unfilled sells | reprice after 60 s, up to 5 times | other numbers; 0 = off |
 | Exit windows | stocks 1:35–1:58 PM MT, ETFs 1:42–1:59 PM MT | other times |

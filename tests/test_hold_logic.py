@@ -116,12 +116,41 @@ def test_next_day_every_exit_applies_from_the_open(store):
     assert placed == [ny(THU, 10)]  # sold the moment the stop was hit, in the morning
 
 
-def test_next_day_with_no_trigger_sells_at_the_window_end(store):
+def test_next_day_with_no_trigger_sells_before_10_am_mountain(store):
+    """Cooper: the next day, anything still held is sold before 10 AM MT (noon New York)."""
     buy(store, WED)
     eng, clock = engine(store, ny(THU, 9, 0), lambda now: 1.05)
+    placed = []
+    real_place_exit = eng.broker.place_exit
+    eng.broker.place_exit = lambda *a, **k: placed.append(clock[0]) or real_place_exit(*a, **k)
     eng.run(THU)
     assert exits(store) == ["HardTimeExit"] and not store.open_positions()
-    assert ny(THU, 15, 58) <= clock[0] < ny(THU, 16)
+    assert placed == [ny(THU, 11, 55)]  # 9:55 AM MT
+
+
+def test_next_day_sell_by_is_a_setting(store):
+    buy(store, WED)
+    eng, _ = engine(store, ny(THU, 9, 0), lambda now: 1.05, next_day_sell_by=time(8, 30))
+    plan = eng._exit_plan(THU, AssetClass.SINGLE_NAME, WED, date(2026, 9, 18))
+    assert plan.hard_exit_at == ny(THU, 10, 30)  # 8:30 AM MT
+
+
+def test_next_day_sell_by_holds_on_a_half_day(store):
+    """The day after Thanksgiving closes 11:00 AM MT; 9:55 AM MT is still 9:55 AM MT."""
+    black_friday = date(2026, 11, 27)
+    eng, _ = engine(store, ny(black_friday, 9, 0), lambda now: 1.0)
+    plan = eng._exit_plan(black_friday, AssetClass.SINGLE_NAME, date(2026, 11, 25), date(2026, 12, 18))
+    assert plan.hard_exit_at == ny(black_friday, 11, 55)
+
+
+def test_entry_day_positions_are_watched_from_the_purchase(store):
+    """Cooper: the bot may sell any time between the buy and the close, not only in the
+    exit window (an ETF bought at 3:35 PM New York used to wait until 3:42)."""
+    buy(store, WED)
+    eng, _ = engine(store, ny(WED, 15, 35), lambda now: 1.0)
+    for ac in (AssetClass.ETF, AssetClass.SINGLE_NAME):
+        plan = eng._exit_plan(WED, ac, WED, date(2026, 9, 18))
+        assert plan.kind == "entry_day" and plan.start == ny(WED, 9, 30)
 
 
 def test_next_day_start_setting_delays_monitoring(store):
@@ -132,14 +161,19 @@ def test_next_day_start_setting_delays_monitoring(store):
         seen.append(now)
         return 0.55  # would trip the stops as soon as they are evaluated
 
-    eng, _ = engine(store, ny(THU, 9, 0), price, held_exit_start=time(14, 0))
+    eng, _ = engine(store, ny(THU, 9, 0), price, held_exit_start=time(11, 0))
     eng.run(THU)
-    first = store.conn.execute("SELECT created_at_utc FROM exit_events").fetchone()
     assert exits(store)[0] in ("ProfitPointTrail", "TrailingPeak", "StopLoss")
-    # No sell before 2:00 PM New York, although quotes were read all morning.
+    # No sell before 11:00 AM New York, although quotes were read all morning.
     plan = eng._exit_plan(THU, AssetClass.SINGLE_NAME, WED, date(2026, 9, 18))
-    assert plan.kind == "held" and plan.start == ny(THU, 14)
+    assert plan.kind == "held" and plan.start == ny(THU, 11)
     assert min(seen) < ny(THU, 10)
+
+
+def test_next_day_start_never_passes_the_sell_by_time(store):
+    eng, _ = engine(store, ny(THU, 9, 0), lambda now: 1.0, held_exit_start=time(14, 0))
+    plan = eng._exit_plan(THU, AssetClass.SINGLE_NAME, WED, date(2026, 9, 18))
+    assert plan.start == plan.hard_exit_at == ny(THU, 11, 55)
 
 
 def test_overdue_position_is_sold_from_the_start_of_monitoring(store):

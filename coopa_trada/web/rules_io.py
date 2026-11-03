@@ -50,13 +50,14 @@ OPTIONAL_DEFAULTS = {
     "auto_start_daily": True,
     "practice_real_prices": False,
     "next_day_time_exit": True,
+    "next_day_sell_by": "09:55",
     "contracts_per_pick": 1,
     "auto_start_time": "07:00",
 }
 HOLD_NOTE = (
     "Cooper's hold rule: if the take-profit is reached on the day of entry, sell that day; "
     "otherwise hold and roll to the next trading day, where every exit applies and anything "
-    "still open is sold at the end of that day's exit window. 'Stops on the day of entry' "
+    "still open is sold by 'Next day, sell by' (9:55 AM MT unless changed). 'Stops on the day of entry' "
     "decides whether the stop-type exits (hard stop, trailing stops, profit-point trail) also "
     "protect a position on the day it was bought. 'Next-day exits start' is when held "
     "positions start being watched: open, a New York HH:MM time, or minutes before the close."
@@ -151,7 +152,7 @@ def _describe(key: str, values: dict) -> str:
         when = ("from the market open" if start == "open" else
                 f"from {start} New York time" if isinstance(start, str) else
                 f"from {start} minutes before the close")
-        sell = ("anything still open is sold at the end of the next day's window"
+        sell = (f"anything still open is sold by {values.get('next_day_sell_by', '09:55')} MT"
                 if values.get("next_day_time_exit", True) else "held until a rule fires")
         return f"every rule {when}; {sell}"
     if key == "profit_point_trail":
@@ -280,6 +281,7 @@ def _coerce_payload(payload: dict) -> dict:
     except (TypeError, ValueError):
         raise RulesValidationError("contracts_per_pick must be a whole number") from None
     out["auto_start_time"] = str(payload.get("auto_start_time") or OPTIONAL_DEFAULTS["auto_start_time"]).strip()
+    out["next_day_sell_by"] = str(payload.get("next_day_sell_by") or OPTIONAL_DEFAULTS["next_day_sell_by"]).strip()
     out["exit_reference_price"] = payload.get("exit_reference_price", OPTIONAL_DEFAULTS["exit_reference_price"])
     out["rank_delta_source"] = payload.get("rank_delta_source", OPTIONAL_DEFAULTS["rank_delta_source"])
     stops = payload.get("stops_on_entry_day", OPTIONAL_DEFAULTS["stops_on_entry_day"])

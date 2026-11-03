@@ -122,6 +122,10 @@ class Rules:
     # (at most one night held). False: keep holding until a rule fires (an
     # option is still sold on its expiration day).
     next_day_time_exit: bool = True
+    # Cooper: on the next trading day, sell anything still held by this Mountain
+    # time (only when next_day_time_exit is on). 09:55 MT leaves time for the
+    # sale to fill before 10:00 AM MT.
+    next_day_sell_by: time = time(9, 55)
     # Contracts bought per pick (the per-pick cap and the budget count them all).
     contracts_per_pick: int = 1
     auto_start_daily: bool = True
@@ -316,12 +320,19 @@ def load_rules(path: str | Path) -> Rules:
     time_exit = data.get("next_day_time_exit", True)
     if type(time_exit) is not bool:
         raise ValueError("next_day_time_exit must be true or false")
+    try:
+        sell_by = _coerce_endpoint(data.get("next_day_sell_by", "09:55"))
+        if not isinstance(sell_by, time):
+            raise ValueError
+    except (ValueError, TypeError):
+        raise ValueError('next_day_sell_by must be a Mountain-time HH:MM, for example "09:55"') from None
     per_pick = data.get("contracts_per_pick", 1)
     if isinstance(per_pick, bool) or not isinstance(per_pick, int) or not 1 <= per_pick <= 100:
         raise ValueError("contracts_per_pick must be a whole number from 1 to 100")
 
     return Rules(
         next_day_time_exit=time_exit,
+        next_day_sell_by=sell_by,
         contracts_per_pick=per_pick,
         auto_start_daily=auto_daily,
         auto_start_time=auto_time,

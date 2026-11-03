@@ -102,6 +102,19 @@ class CalendarService:
             return self.session_open(d)
         return self._resolve_endpoint(d, endpoint, self.session_close(d))
 
+    def sell_by(self, d: date, mountain: time) -> datetime:
+        """A Mountain-time wall clock on session ``d``, kept inside that session.
+
+        Not shifted on half days (unlike exit-window times): "sell by 9:55 AM MT"
+        means 9:55 AM MT whenever the market closes. A time after the close
+        resolves to one minute before it.
+        """
+        from .clock import DISPLAY_TZ
+
+        at = datetime.combine(d, mountain, tzinfo=DISPLAY_TZ).astimezone(MARKET_TZ)
+        open_, close = self.session_open(d), self.session_close(d)
+        return min(max(at, open_), close - timedelta(minutes=1))
+
     # -- holding period ---------------------------------------------------
     def next_session(self, d: date) -> date:
         """The first trading day strictly after ``d`` (skips weekends and holidays)."""

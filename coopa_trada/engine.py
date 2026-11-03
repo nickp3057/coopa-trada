@@ -526,17 +526,20 @@ class Engine:
     def _exit_plan(self, day: date, asset_class, entry_day: date, expiration: date | None) -> "ExitPlan":
         """Which exits apply to a position today, and from when.
 
-        Cooper's hold rule: on the day of entry only the take-profit (plus the
-        stop-type exits when ``stops_on_entry_day``) can sell; otherwise the
-        position is held and rolls to the next trading day, where every exit
-        applies from ``held_exit_start`` and the time exit sells at that day's
-        exit-window end. An option expiring on its entry day cannot be held,
-        so the time exit applies then too. A position still open after its
-        planned next-day exit is overdue and is sold from the start of today's
+        Cooper's rule: on the day of entry the take-profit (plus the stop-type
+        exits when ``stops_on_entry_day``) can sell from the moment of purchase
+        until the exit-window end; otherwise the position is held and rolls to
+        the next trading day, where every exit applies from ``held_exit_start``
+        and the time exit sells at ``next_day_sell_by`` (Mountain time, 9:55 AM
+        by default). An option expiring on its entry day cannot be held, so the
+        time exit applies then too. A position still open after its planned
+        next-day exit is overdue and is sold from the start of today's
         monitoring.
         """
-        start, end = self.cal.exit_window(day, asset_class, self.rules)
+        _, end = self.cal.exit_window(day, asset_class, self.rules)
         if entry_day >= day:
+            # Watched from the purchase: a position only exists once it is bought.
+            start = self.cal.session_open(day)
             expires_today = expiration is not None and expiration <= day
             keep = [s for s in self.composite.strategies
                     if isinstance(s, TakeProfit)
@@ -550,10 +553,12 @@ class Engine:
             expires_today = expiration is not None and expiration <= day
             keep = [s for s in self.composite.strategies if not isinstance(s, HardTimeExit) or expires_today]
             return ExitPlan("held", held_start, end, end, CompositeExit(keep), held_overnight=not expires_today)
+        sell_by = min(self.cal.sell_by(day, self.rules.next_day_sell_by), end)
+        held_start = min(held_start, sell_by)
         planned = self.cal.next_session(entry_day)
         if day > planned:
-            return ExitPlan("overdue", held_start, end, held_start, self.composite, held_overnight=False)
-        return ExitPlan("held", held_start, end, end, self.composite, held_overnight=False)
+            return ExitPlan("overdue", held_start, sell_by, held_start, self.composite, held_overnight=False)
+        return ExitPlan("held", held_start, sell_by, sell_by, self.composite, held_overnight=False)
 
     def _signal_meta(self, signal_id: str, cache: dict):
         from .models import AssetClass

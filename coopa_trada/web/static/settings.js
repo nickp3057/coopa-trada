@@ -29,7 +29,7 @@ const NUMBER_FIELDS = [
   "profit_trail_points",
 ];
 const TEXT_FIELDS = ["profit_trail_arm", "held_exit_start", "rank_delta_source", "exit_reference_price",
-  "auto_start_time"];
+  "auto_start_time", "next_day_sell_by"];
 const BOOL_FIELDS = ["stops_on_entry_day", "auto_start_daily", "practice_real_prices", "next_day_time_exit"];
 const DELTA_NUMBERS = ["min_abs_delta", "max_abs_delta"];
 const EW_LABELS = { SINGLE_NAME: "Stocks", ETF: "ETFs" };

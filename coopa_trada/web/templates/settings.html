@@ -175,8 +175,13 @@
       <label class="switch"><input type="checkbox" name="stops_on_entry_day"><span class="slider" aria-hidden="true"></span>
         Stops also protect a position on the day it&rsquo;s bought</label>
       <label class="switch"><input type="checkbox" name="next_day_time_exit"><span class="slider" aria-hidden="true"></span>
-        Sell anything still open at the end of the next trading day</label>
+        Sell anything still open on the next trading day</label>
       <div class="grid2">
+        <div class="field">
+          <label for="f-sellby">Next day, sell by</label>
+          <input id="f-sellby" name="next_day_sell_by" type="time">
+          <p class="help">Mountain time. Cooper: sold before 10:00 AM.</p>
+        </div>
         <div class="field">
           <label for="f-held">Next-day watching starts</label>
           <input id="f-held" name="held_exit_start" type="text" spellcheck="false">

@@ -80,10 +80,13 @@ profit_trail_arm: from_entry
 #
 stops_on_entry_day: true
 held_exit_start: open
-# true: anything still open is sold at the end of the next trading day's exit
-# window (held at most one night). false: hold until a rule fires (an option is
+# true: anything still open is sold on the next trading day by next_day_sell_by
+# (held at most one night). false: hold until a rule fires (an option is
 # still sold on its expiration day).
 next_day_time_exit: true
+# Cooper: the next day, sell before 10 AM. A Mountain-time HH:MM; 09:55 leaves
+# time for the sale to fill before 10:00.
+next_day_sell_by: "09:55"
 
 # Cooper: $300 is the TOTAL budget (raise it later if trading is profitable):
 # the most all open positions together may cost, including ones held from
