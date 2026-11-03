@@ -21,6 +21,13 @@ Security: passwords are stored as salted hashes (never the password); the
 without codes, totp_secret "", logs in with the password alone); 5 wrong tries for
 a name or from one address lock it for 15 minutes; the session cookie is
 signed, HttpOnly, SameSite=Strict, Secure behind HTTPS, and lasts 12 hours.
+
+"Remember this device" (ticked by default): after a login with the 6-digit code,
+a second signed cookie lets that browser skip the code for 90 days, and its
+session lasts 30 days instead of 12 hours. The password is still asked. It is
+tied to the person's codes and session version, so reset-password, reset-2fa
+and remove-2fa forget every remembered device. "Log out" keeps the device
+remembered; /logout?forget=1 forgets it.
 """
 
 from __future__ import annotations
@@ -49,6 +56,9 @@ __all__ = ["GatewayConfig", "create_gateway", "totp", "verify_totp", "main"]
 DEFAULT_CONFIG = Path("~/coopa-data/gateway.yaml").expanduser()
 COOKIE = "coopa_session"
 SESSION_SECONDS = 12 * 3600
+DEVICE_COOKIE = "coopa_device"
+DEVICE_SECONDS = 90 * 24 * 3600          # a remembered device skips the code this long
+REMEMBERED_SESSION_SECONDS = 30 * 24 * 3600  # and stays logged in this long
 MAX_FAILURES = 5
 LOCK_SECONDS = 15 * 60
 MIN_PASSWORD = 12
@@ -216,8 +226,11 @@ p.err{{color:var(--bad);margin:12px 0 0}}
 <h1>Coopa Trada</h1>
 <label for="u">Name</label><input id="u" name="username" autocomplete="username" autocapitalize="none" required value="{username}">
 <label for="p">Password</label><input id="p" name="password" type="password" autocomplete="current-password" required>
-<label for="c">6-digit code <span style="font-size:12px">(leave empty if you didn't set up codes)</span></label>
-<input id="c" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9 ]{{6,7}}">
+{code_field}
+<label style="display:flex;gap:8px;align-items:center;color:var(--text);margin-top:14px">
+<input type="checkbox" name="remember" value="1" style="width:auto" {remember}> Remember this device</label>
+<p style="color:var(--muted);font-size:13px;margin:4px 0 0">No code on this device for 90 days, and stay logged in for 30.
+Leave it off on a shared computer.</p>
 <input type="hidden" name="next" value="{next}">
 <button type="submit">Log in</button>{error}
 </form></body></html>"""
@@ -261,6 +274,7 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
     app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = 9 * 1024 * 1024
     signer = URLSafeTimedSerializer(config.secret_key, salt="coopa-gateway-session")
+    device_signer = URLSafeTimedSerializer(config.secret_key, salt="coopa-gateway-device")
     throttle = Throttle(clock)
     state = {"config": config, "mtime": _mtime(config.path)}
     save_lock = threading.Lock()
@@ -287,16 +301,47 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
         if not token:
             return None
         try:
-            data = signer.loads(token, max_age=SESSION_SECONDS)
+            data, signed_at = signer.loads(token, max_age=REMEMBERED_SESSION_SECONDS, return_timestamp=True)
         except (BadSignature, TypeError):
             return None
+        # Cookie ages use the real clock, like the signature's own timestamp.
+        if not data.get("r") and time.time() - signed_at.timestamp() > SESSION_SECONDS:
+            return None  # an ordinary session lasts 12 hours
         user = cfg().users.get(data.get("u"))
         if user is None or data.get("v") != user.session_version:
             return None
         return user
 
+    def device_fingerprint(user: User) -> str:
+        # Changes when the person's codes or session version change, forgetting the device.
+        return hashlib.sha256(f"{user.totp_secret}:{user.session_version}".encode()).hexdigest()[:16]
+
+    def remembered_user() -> User | None:
+        """The person this browser was remembered for, while that is still valid."""
+        token = request.cookies.get(DEVICE_COOKIE)
+        if not token:
+            return None
+        try:
+            data = device_signer.loads(token, max_age=DEVICE_SECONDS)
+        except (BadSignature, TypeError):
+            return None
+        user = cfg().users.get(data.get("u"))
+        if user is None or not user.totp_secret or data.get("f") != device_fingerprint(user):
+            return None
+        return user
+
     def page(username="", error="", nxt="/", status=200):
-        body = _PAGE.format(username=html.escape(username), next=html.escape(nxt),
+        known = remembered_user()
+        if known is not None and (not username or username == known.name):
+            username = known.name
+            code_field = ('<p style="color:var(--muted);font-size:14px;margin:12px 0 0">This device is remembered: '
+                          'no code needed. <a href="/logout?forget=1" style="color:var(--accent)">Forget it</a></p>')
+        else:
+            code_field = ('<label for="c">6-digit code <span style="font-size:12px">(leave empty if you didn\'t '
+                          'set up codes)</span></label>\n<input id="c" name="code" inputmode="numeric" '
+                          'autocomplete="one-time-code" pattern="[0-9 ]{6,7}">')
+        body = _PAGE.format(username=html.escape(username), next=html.escape(nxt), code_field=code_field,
+                            remember="checked",
                             error=f'<p class="err" role="alert">{html.escape(error)}</p>' if error else "")
         return make_response(body, status)
 
@@ -329,20 +374,34 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
         user = cfg().users.get(name)
         password_ok = user is not None and check_password(user.password_hash, request.form.get("password", ""))
         step = None
-        if password_ok and user.totp_secret:
+        known = remembered_user()
+        device_ok = password_ok and known is not None and known.name == name
+        if password_ok and user.totp_secret and not device_ok:
             step = verify_totp(user.totp_secret, request.form.get("code", ""), clock(),
                                after_step=last_step.get(name, -1))
-        if not password_ok or (user.totp_secret and step is None):
+        if not password_ok or (user.totp_secret and step is None and not device_ok):
             throttle.fail(*keys)
             return page(name, "Wrong name, password or code.", nxt, 401)
         if step is not None:
             last_step[name] = step
         throttle.clear(*keys)
-        return start_session(redirect(nxt, 303), user)
+        remember = request.form.get("remember") == "1"
+        resp = start_session(redirect(nxt, 303), user, remember=remember)
+        if remember and user.totp_secret:
+            # Refreshed on every login, so a device in regular use stays remembered.
+            resp.set_cookie(DEVICE_COOKIE, device_signer.dumps({"u": user.name, "f": device_fingerprint(user)}),
+                            max_age=DEVICE_SECONDS, httponly=True, samesite="Strict", secure=https(), path="/")
+        elif not remember:
+            resp.delete_cookie(DEVICE_COOKIE, path="/")
+        return resp
 
-    def start_session(resp, user: User):
-        resp.set_cookie(COOKIE, signer.dumps({"u": user.name, "v": user.session_version}),
-                        max_age=SESSION_SECONDS, httponly=True, samesite="Strict", secure=https(), path="/")
+    def start_session(resp, user: User, *, remember: bool = False):
+        payload = {"u": user.name, "v": user.session_version}
+        if remember:
+            payload["r"] = 1
+        resp.set_cookie(COOKIE, signer.dumps(payload),
+                        max_age=REMEMBERED_SESSION_SECONDS if remember else SESSION_SECONDS,
+                        httponly=True, samesite="Strict", secure=https(), path="/")
         return resp
 
     def setup_page(invite: Invite, token: str, error: str = "", status: int = 200):
@@ -403,6 +462,8 @@ def create_gateway(config: GatewayConfig, *, clock=time.time, http_client=None):
     def logout():
         resp = redirect("/login", 303)
         resp.delete_cookie(COOKIE, path="/")
+        if request.args.get("forget") == "1":
+            resp.delete_cookie(DEVICE_COOKIE, path="/")
         return resp
 
     @app.route("/", defaults={"path": ""}, methods=["GET", "POST", "PUT", "DELETE", "PATCH"])

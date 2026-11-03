@@ -18,8 +18,7 @@ The plain-English rulebook, with dollar examples and every setting, is
 - **Cooper's spec** (list ~1:40 PM MT, buy before 2, trade until the close, sell the
   rest next day before 10 AM): held positions now sell at `next_day_sell_by`
   (09:55 MT, new setting) instead of 1:58 PM; buy-day positions are watched from the
-  purchase. Open question with Cooper: may a pick be **bought again** the same
-  afternoon after it was sold? (Today: each pick once a day.)
+  purchase. Cooper confirmed (2026-11-03): each pick is bought **once** a day.
 - **Simulator** (Simulator tab, `coopa_trada/simulator.py`, `docs/SIMULATOR.md`):
   replays a list on chosen dates/times with the real engine, pretend Schwab, fake
   clock, own process. Prices: made-up shapes, real stock minute bars + Black-Scholes
@@ -28,6 +27,10 @@ The plain-English rulebook, with dollar examples and every setting, is
 - **Activity tab**: open positions with every trigger price; the full daily log.
 - **Logs**: `logs/YYYY-MM-DD.log` per bot, a year; every POST and settings diff.
 - Server: dead `niclk` / `YOURNAME` units disabled; both Schwab logins expired.
+- UI redesign (status tiles, settings at a glance, hover tips, dark mode).
+- Login website: **Remember this device** (default on): no 6-digit code on that
+  browser for 90 days, session 30 days; password still asked; reset-2fa /
+  reset-password / remove-2fa forget every device; `/logout?forget=1`.
 
 ## Session summary (2026-10-29): merge, practice on real prices
 

@@ -310,3 +310,74 @@ def test_codes_can_be_left_off_or_removed_at_the_server(tmp_path, monkeypatch):
     gw.main(["--config", str(path), "remove-2fa", "nick"])
     nick = gw.GatewayConfig.load(path).users["nick"]
     assert nick.totp_secret == "" and nick.session_version == 2
+
+
+# -- remember this device ---------------------------------------------------------
+def remember_login(client, config, name, code_=None, remember=True, at=T):
+    data = {"username": name, "password": f"{name}-long-password", "code": code_ if code_ is not None else code(config, name, at)}
+    if remember:
+        data["remember"] = "1"
+    return client.post("/login", data=data)
+
+
+def test_a_remembered_device_skips_the_code_but_not_the_password(setup):
+    client, config, clock, _ = setup
+    assert remember_login(client, config, "cooper").status_code == 303
+    assert client.get_cookie(gw.DEVICE_COOKIE) is not None
+    client.get("/logout")
+    assert client.get_cookie(gw.DEVICE_COOKIE) is not None  # logging out keeps the device
+    clock[0] = T + 90
+    assert "This device is remembered" in client.get("/login").get_data(as_text=True)
+    assert remember_login(client, config, "cooper", code_="").status_code == 303
+    assert client.get("/api/rules").status_code == 200
+    client.get("/logout")
+    bad = client.post("/login", data={"username": "cooper", "password": "wrong-password-xx", "remember": "1"})
+    assert bad.status_code == 401
+
+
+def test_without_remember_the_code_is_needed_every_time(setup):
+    client, config, clock, _ = setup
+    assert remember_login(client, config, "cooper", remember=False).status_code == 303
+    assert client.get_cookie(gw.DEVICE_COOKIE) is None
+    client.get("/logout")
+    clock[0] = T + 90
+    assert remember_login(client, config, "cooper", code_="", remember=False).status_code == 401
+
+
+def test_a_device_remembered_for_one_person_does_not_skip_anothers_code(setup):
+    client, config, clock, _ = setup
+    remember_login(client, config, "cooper")
+    client.get("/logout")
+    assert remember_login(client, config, "nick", code_="").status_code == 401
+
+
+def test_new_codes_or_a_new_password_forget_remembered_devices(setup):
+    client, config, clock, _ = setup
+    remember_login(client, config, "cooper")
+    client.get("/logout")
+    stored = gw.GatewayConfig.load(config.path)
+    stored.users["cooper"].totp_secret = gw.new_totp_secret()  # what reset-2fa does
+    stored.save()
+    clock[0] = T + 90
+    assert remember_login(client, config, "cooper", code_="").status_code == 401
+
+
+def test_forget_removes_the_device(setup):
+    client, config, clock, _ = setup
+    remember_login(client, config, "cooper")
+    client.get("/logout?forget=1")
+    assert client.get_cookie(gw.DEVICE_COOKIE) is None
+
+
+def test_a_remembered_session_lasts_30_days_an_ordinary_one_12_hours(setup, monkeypatch):
+    import time as real_time
+    client, config, clock, _ = setup
+    now = real_time.time()
+    remember_login(client, config, "cooper")
+    other = setup[0].application.test_client()
+    remember_login(other, config, "nick", code_=code(config, "nick", T), remember=False)
+    monkeypatch.setattr(real_time, "time", lambda: now + 13 * 3600)
+    assert client.get("/api/rules").status_code == 200   # remembered: still in
+    assert other.get("/api/rules").status_code == 401    # ordinary: 12 hours are up
+    monkeypatch.setattr(real_time, "time", lambda: now + 31 * 24 * 3600)
+    assert client.get("/api/rules").status_code == 401
