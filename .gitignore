@@ -26,3 +26,8 @@ imports/
 
 # tickers a bot learned from pick lists
 config/asset_classes.learned.yaml
+
+# per-bot debugging data next to the database
+logs/
+simulations/
+sim-seeds/

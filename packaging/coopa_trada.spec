@@ -8,6 +8,7 @@ ROOT = os.path.abspath(os.path.join(SPECPATH, ".."))
 datas = [
     (os.path.join(ROOT, "coopa_trada/web/templates"), "coopa_trada/web/templates"),
     (os.path.join(ROOT, "coopa_trada/web/static"), "coopa_trada/web/static"),
+    (os.path.join(ROOT, "coopa_trada/sim_seeds"), "coopa_trada/sim_seeds"),
     (os.path.join(ROOT, "config/rules.example.yaml"), "config"),
     (os.path.join(ROOT, "config/asset_classes.yaml"), "config"),
     (os.path.join(ROOT, "data/signals.example.csv"), "data"),

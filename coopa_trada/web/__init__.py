@@ -65,6 +65,19 @@ def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None
         if request.method == "POST" and origin and urlsplit(origin).netloc not in hosts:
             return jsonify(error="Cross-origin writes are not allowed"), 403
 
+    import logging
+    actions = logging.getLogger("coopa_trada.web.actions")
+
+    @app.after_request
+    def log_action(response):
+        # Every change a person makes (button, upload, setting, switch) goes in the
+        # log with who and the result. Only the path: bodies can hold keys or codes.
+        if request.method == "POST":
+            user = request.headers.get("X-Coopa-User") if request.remote_addr in ("127.0.0.1", "::1") else None
+            actions.info("%s %s -> %s%s", request.method, request.path, response.status_code,
+                         f" (by {user})" if user else "")
+        return response
+
     @app.errorhandler(413)
     def oversized(_error):
         return jsonify(error="File is too large; the limit is 8 MB"), 413
@@ -80,6 +93,8 @@ def create_app(paths: WebPaths | None = None, runner: EngineRunner | None = None
     # Held only once a watchdog is started (desktop app / python -m coopa_trada.web).
     app.config["COOPA_KEEPAWAKE"] = KeepAwake()
     app.register_blueprint(bp)
+    from .sim_views import bp as sim_bp
+    app.register_blueprint(sim_bp)
 
     # Telegram intake (optional): built here so its Confirm button saves picks exactly
     # like the dashboard; polling starts only in the real app (see start_telegram).

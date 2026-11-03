@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -130,6 +130,19 @@ class Store:
                 order_id INTEGER PRIMARY KEY REFERENCES orders(id),
                 peak_mid REAL NOT NULL
             );
+            -- Every option quote the bot read, so a day can be replayed in the
+            -- simulator on the prices it really saw. real=1: from Schwab.
+            CREATE TABLE IF NOT EXISTS quote_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                at_utc     TEXT NOT NULL,
+                osi_symbol TEXT NOT NULL,
+                bid        REAL,
+                ask        REAL,
+                mid        REAL,
+                real       INTEGER NOT NULL,
+                mode       TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS quote_log_symbol_time ON quote_log(osi_symbol, at_utc);
             -- Submits whose outcome had to be recovered. Unresolved UNKNOWN rows
             -- halt new orders for that contract until a person resolves them.
             CREATE TABLE IF NOT EXISTS order_incidents (
@@ -465,6 +478,25 @@ class Store:
                 price_cents = math.ceil(max(o["limit_price"] or 0.0, avg) * 100 - 1e-6)
                 total += held * price_cents * 100
         return total
+
+    def record_quote(self, osi_symbol: str, bid, ask, mid, *, at: datetime, real: bool, mode: str) -> None:
+        self.conn.execute(
+            "INSERT INTO quote_log (at_utc, osi_symbol, bid, ask, mid, real, mode) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (at.astimezone(timezone.utc).isoformat(), osi_symbol, bid, ask, mid, int(real), mode),
+        )
+
+    def recorded_quotes(self, osi_symbol: str, start: datetime, end: datetime, *, real_only: bool = True):
+        """Recorded quotes for one option between two moments, oldest first."""
+        return self.conn.execute(
+            "SELECT at_utc, bid, ask, mid FROM quote_log WHERE osi_symbol = ? AND at_utc >= ? AND at_utc <= ?"
+            + (" AND real = 1" if real_only else "") + " ORDER BY at_utc",
+            (osi_symbol, start.astimezone(timezone.utc).isoformat(), end.astimezone(timezone.utc).isoformat()),
+        ).fetchall()
+
+    def latest_quote(self, osi_symbol: str):
+        return self.conn.execute(
+            "SELECT at_utc, bid, ask, mid, real FROM quote_log WHERE osi_symbol = ? ORDER BY id DESC LIMIT 1",
+            (osi_symbol,)).fetchone()
 
     def update_peak(self, order_id: int, mid: float) -> None:
         self.conn.execute(

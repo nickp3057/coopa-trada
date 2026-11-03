@@ -1,6 +1,6 @@
 # Project state — Coopa Trada
 
-_Last updated: 2026-10-29_
+_Last updated: 2026-11-03_
 
 Python/Flask app that trades Cooper's daily FOMC option picks through Schwab. It runs
 as a double-click macOS app or as a service on a Linux server
@@ -12,6 +12,22 @@ placed**. The only real Schwab request so far is still Nick's login (2026-10-16)
 
 The plain-English rulebook, with dollar examples and every setting, is
 **`docs/HOW_IT_TRADES.md`**.
+
+## Session summary (2026-11-03): Cooper's timing, simulator, logs
+
+- **Cooper's spec** (list ~1:40 PM MT, buy before 2, trade until the close, sell the
+  rest next day before 10 AM): held positions now sell at `next_day_sell_by`
+  (09:55 MT, new setting) instead of 1:58 PM; buy-day positions are watched from the
+  purchase. Open question with Cooper: may a pick be **bought again** the same
+  afternoon after it was sold? (Today: each pick once a day.)
+- **Simulator** (Simulator tab, `coopa_trada/simulator.py`, `docs/SIMULATOR.md`):
+  replays a list on chosen dates/times with the real engine, pretend Schwab, fake
+  clock, own process. Prices: made-up shapes, real stock minute bars + Black-Scholes
+  (needs Schwab login), or recorded quotes (`quote_log`, new: the engine saves every
+  quote it reads).
+- **Activity tab**: open positions with every trigger price; the full daily log.
+- **Logs**: `logs/YYYY-MM-DD.log` per bot, a year; every POST and settings diff.
+- Server: dead `niclk` / `YOURNAME` units disabled; both Schwab logins expired.
 
 ## Session summary (2026-10-29): merge, practice on real prices
 

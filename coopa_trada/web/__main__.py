@@ -37,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
 
     app = create_app()
     paths = app.config["COOPA_PATHS"]
+    from ..logs import add_file_log
+    add_file_log(paths.db_path)  # every line also kept in daily files a year (Activity page)
     if not args.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
         # Once per serving process (the debug reloader starts a second one).
         from ..autostart import AutoStarter

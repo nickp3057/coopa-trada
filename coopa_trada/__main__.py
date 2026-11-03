@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 from datetime import date
 
 from .calendar_svc import CalendarService
@@ -69,6 +70,13 @@ def build_parser() -> argparse.ArgumentParser:
     reh = sub.add_parser("rehearse",
                          help="replay a pretend Friday-to-Monday cycle (fake clock, fake prices, no Schwab)")
     reh.add_argument("--verbose", action="store_true", help="also show the engine's own log lines")
+
+    sim = sub.add_parser("simulate",
+                         help="replay a pick list on chosen dates (pretend Schwab, fake clock; the Simulator page runs this)")
+    sim.add_argument("request", help="request JSON (see coopa_trada/simulator.py)")
+    sim.add_argument("out", help="folder for status.json, result.json and log.txt")
+    sim.add_argument("--config", default=DEFAULT_CONFIG, help="this bot's rules file (its settings are used)")
+    sim.add_argument("--db", default=DEFAULT_DB, help="this bot's database (read only, for recorded prices)")
 
     return p
 
@@ -273,6 +281,13 @@ def cmd_rehearse(args) -> int:
     return 0
 
 
+def cmd_simulate(args) -> int:
+    from .simulator import main as simulate_main
+
+    return simulate_main(args.request, args.out, rules_path=args.config,
+                         db_path=args.db if Path(args.db).is_file() else None)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "rehearse":
@@ -284,6 +299,7 @@ def main(argv: list[str] | None = None) -> int:
         "resolve": cmd_resolve,
         "unlock": cmd_unlock,
         "readonly-check": cmd_readonly_check,
+        "simulate": cmd_simulate,
     }[args.command]
     from .runlock import RunLocked, StaleLock
 

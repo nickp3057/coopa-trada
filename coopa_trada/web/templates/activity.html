@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %} &middot; Activity{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="row spread">
+    <h1 style="margin:0">Watching now</h1>
+    <span class="hint" id="watch-updated"></span>
+  </div>
+  <p class="hint">Every open position, its latest price, and the price at which each rule would sell it.
+    The highlighted stop is the one that would fire first. Refreshes every 10 seconds.</p>
+  <div id="watch" class="pick-cards"><p class="hint">loading&hellip;</p></div>
+</section>
+
+<section class="card">
+  <div class="row spread">
+    <h1 style="margin:0">Everything that happened</h1>
+    <a id="act-download" class="btn" href="#">Download this day</a>
+  </div>
+  <p class="hint">Every line the bot writes, kept for a year: runs starting and stopping, picks
+    received and confirmed, every buy and sell decision with its reason, orders, fills, skips,
+    alerts, settings changes (old &rarr; new), and every button pressed on these pages.</p>
+  <div class="row">
+    <label class="inline">Day <select id="act-day"></select></label>
+    <label class="inline">Show
+      <select id="act-level">
+        <option value="">everything</option>
+        <option value="WARNING">warnings and errors</option>
+        <option value="ERROR">errors only</option>
+      </select></label>
+    <label class="inline">Search <input id="act-q" type="text" placeholder="e.g. IBIT, EXIT, settings" size="22"></label>
+    <label class="inline"><input id="act-live" type="checkbox" checked> follow live</label>
+  </div>
+  <p id="act-count" class="summary"></p>
+  <div id="act-lines" class="event-feed tall"></div>
+</section>
+{% endblock %}
+{% block script %}<script src="{{ url_for('static', filename='activity.js') }}"></script>{% endblock %}

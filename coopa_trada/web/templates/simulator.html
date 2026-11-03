@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %} &middot; Simulator{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Simulator</h1>
+  <p class="hint">Replays a pick list on the days and times you choose, with this bot&rsquo;s own
+    settings, the real buying and selling code, a pretend Schwab and a fake clock. Nothing is sent
+    to Schwab and the trade log is not touched. For debugging.</p>
+
+  <fieldset>
+    <legend>1. The picks</legend>
+    <div class="row">
+      <label class="inline">Start from
+        <select id="sim-list"><option value="">loading&hellip;</option></select>
+      </label>
+      <span id="sim-list-info" class="hint"></span>
+    </div>
+    <textarea id="sim-csv" rows="7" spellcheck="false" class="mono-area"
+      placeholder="Trade date: 2026-10-27; Expiration: 2026-10-30&#10;SYMBOL,OPTION,LAST PRICE,TVT-DELTA,SCHWAB DELTA&#10;AMD,260C,1.00,66.0,0.55"></textarea>
+    <div class="row">
+      <span class="hint">Edit freely. LAST PRICE is where made-up prices start, and what the option costs at the confirm time with real stock prices.</span>
+      <span class="inline"><input id="seed-name" type="text" placeholder="seed name" size="16">
+        <button id="btn-save-seed" class="btn" type="button">Save as seed</button></span>
+      <span id="seed-msg" class="msg"></span>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>2. When</legend>
+    <div class="sim-grid">
+      <label class="block">Buy date<input id="sim-buy-day" type="date"></label>
+      <label class="block">List confirmed at (MT)<input id="sim-confirm" type="time" value="13:40"></label>
+      <label class="block">Simulation starts at (MT)<input id="sim-start" type="time" value="13:00"></label>
+      <label class="block">Ends on<input id="sim-end-day" type="date">
+        <span class="hint">Blank = the next trading day</span></label>
+      <label class="block">Ends at (MT)<input id="sim-end" type="time" value="10:00"></label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>3. Prices</legend>
+    <label class="choice"><input type="radio" name="sim-prices" value="scenario" checked>
+      <span><strong>Made-up prices</strong>: you pick how each option moves. Best for checking that every rule fires
+        when it should.</span></label>
+    <label class="choice"><input type="radio" name="sim-prices" value="stock">
+      <span><strong>Real stock prices</strong>: the stock&rsquo;s real minute-by-minute prices from Schwab (last ~48 days),
+        with the option&rsquo;s price estimated from them. Needs the Schwab login.</span></label>
+    <label class="choice"><input type="radio" name="sim-prices" value="recorded">
+      <span><strong>Recorded Schwab quotes</strong>: real option prices the bot saved while it ran.
+        <span id="recorded-days" class="hint"></span></span></label>
+    <div id="scenario-opts">
+      <div class="row">
+        <label class="inline">Every pick
+          <select id="sim-shape"></select></label>
+        <label class="inline">Random seed <input id="sim-seed" type="number" value="1" min="0" style="width:80px"></label>
+      </div>
+      <details>
+        <summary>Shape per pick</summary>
+        <div id="per-pick" class="per-pick"></div>
+      </details>
+    </div>
+    <div class="row">
+      <label class="inline">Bid&ndash;ask spread <input id="sim-spread" type="number" value="6" min="0" max="50" step="0.5" style="width:70px">%</label>
+      <label class="inline"><input id="sim-stuck" type="checkbox"> First sell order doesn&rsquo;t fill (tests repricing; the bot only lowers the price, so it reprices once the bid drops)</label>
+    </div>
+  </fieldset>
+
+  <div class="row">
+    <button id="btn-play" class="btn btn-primary">&#9654; Simulate</button>
+    <span id="sim-status" class="status-line"></span>
+  </div>
+</section>
+
+<section class="card" id="playback" hidden>
+  <div class="row spread">
+    <h2 id="pb-title">Playback</h2>
+    <span class="row" style="margin:0">
+      <a id="dl-log" class="btn" href="#">Download log</a>
+      <a id="dl-json" class="btn" href="#" target="_blank" rel="noopener">Raw data</a>
+    </span>
+  </div>
+  <div id="pb-notes"></div>
+  <div class="pb-bar">
+    <button id="pb-restart" class="btn" title="Back to the start">&#9198;</button>
+    <button id="pb-toggle" class="btn btn-primary" title="Play / pause">&#9654;</button>
+    <button id="pb-step" class="btn" title="One tick forward">&#9197;</button>
+    <label class="inline">Speed
+      <select id="pb-speed">
+        <option value="1">real time</option>
+        <option value="10">10&times;</option>
+        <option value="60" selected>60&times; (a minute a second)</option>
+        <option value="300">300&times;</option>
+        <option value="1800">1800&times;</option>
+      </select></label>
+    <label class="inline"><input id="pb-skip" type="checkbox" checked> skip quiet stretches</label>
+  </div>
+  <input id="pb-scrub" type="range" min="0" value="0" class="scrub" aria-label="Simulated time">
+  <div class="pb-clock"><span id="pb-time">&mdash;</span> <span id="pb-note" class="hint"></span></div>
+  <div id="pb-summary" class="pb-summary"></div>
+  <h3>Positions</h3>
+  <div id="pb-picks" class="pick-cards"></div>
+  <details id="pb-unbought-wrap">
+    <summary id="pb-unbought-title">Not bought</summary>
+    <ul id="pb-unbought" class="plain-list"></ul>
+  </details>
+  <div class="row spread">
+    <h3 style="margin:0">What happened</h3>
+    <span class="row" style="margin:0">
+      <label class="inline"><input id="ev-logs" type="checkbox"> engine log lines</label>
+      <label class="inline"><input id="ev-all" type="checkbox"> whole run (not just up to now)</label>
+    </span>
+  </div>
+  <div id="pb-events" class="event-feed" aria-live="polite"></div>
+  <h3>Trades at the end</h3>
+  <div class="table-wrap"><table id="pb-trades"><thead><tr>
+    <th>Contract</th><th>Bought</th><th class="num">Paid</th><th>Sold</th><th class="num">Got</th>
+    <th class="num">P&amp;L</th><th>Why</th></tr></thead><tbody></tbody></table></div>
+</section>
+
+<section class="card">
+  <div class="row spread"><h2 style="margin:0">Past simulations</h2>
+    <button id="btn-history" class="btn">Refresh</button></div>
+  <div class="table-wrap"><table id="sim-history"><thead><tr>
+    <th>Run</th><th>List</th><th>Buy day</th><th>Prices</th><th>Result</th><th></th></tr></thead>
+    <tbody><tr><td colspan="6">loading&hellip;</td></tr></tbody></table></div>
+</section>
+{% endblock %}
+{% block script %}<script src="{{ url_for('static', filename='simulator.js') }}"></script>{% endblock %}

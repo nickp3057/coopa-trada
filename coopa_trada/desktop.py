@@ -160,6 +160,8 @@ def main(argv: list[str] | None = None) -> int:
     from .watchdog import Watchdog
 
     app = create_app()
+    from .logs import add_file_log
+    add_file_log(app.config["COOPA_PATHS"].db_path)  # every line, kept a year (Activity page)
     server = make_server("127.0.0.1", port, app, threaded=True)
     from .autostart import AutoStarter
     watchdog = Watchdog(app.config["COOPA_PATHS"], app.config["COOPA_RUNNER"],

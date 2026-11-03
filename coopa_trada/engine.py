@@ -424,6 +424,8 @@ class Engine:
             except ContractNotTradable as exc:
                 self._record_skip(signal, day, "not_tradable", f"not tradable ({exc})", {})
                 continue
+            self._record_quote(contract.osi_symbol, Quote(contract.bid, contract.ask, contract.mid),
+                               real=getattr(self.resolver, "requires_schwab_token", False))
 
             # Fixed quantity per pick (1). FixedQuantitySizer returns 0 when that
             # pick's cost at the ask would exceed max_dollars_per_position -- skip it.
@@ -841,4 +843,15 @@ class Engine:
                     key=f"quote:{osi_symbol}")
             return None
         self._quote_failures.pop(osi_symbol, None)
+        self._record_quote(osi_symbol, quote)
         return quote
+
+    def _record_quote(self, osi_symbol: str, quote: Quote, *, real: bool | None = None) -> None:
+        """Keep the quote for the simulator's "recorded prices" replay. Never stops a run."""
+        if real is None:
+            real = getattr(self.quote_source, "requires_schwab_token", False)
+        try:
+            self.store.record_quote(osi_symbol, quote.bid, quote.ask, quote.mid, at=self._now(),
+                                    real=bool(real), mode=self.mode.value)
+        except Exception as exc:  # noqa: BLE001
+            self.log.warning("could not record the quote for %s: %s", osi_symbol, exc)

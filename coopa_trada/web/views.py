@@ -83,11 +83,26 @@ def api_rules_post():
     if payload is None:
         return jsonify(error="request body must be JSON"), 400
     try:
+        before = read_rules_dict(_paths().config_path)
+    except Exception:  # noqa: BLE001 - a broken file is still replaced below
+        before = {}
+    try:
         updated = write_rules(_paths().config_path, payload)
     except RulesValidationError as exc:
+        current_app.logger.warning("settings change refused: %s", exc)
         return jsonify(error=str(exc)), 400
+    _log_settings_change(before, read_rules_dict(_paths().config_path))
     # A run reads the settings when it starts: say so, so a change isn't silently ignored.
     return jsonify(**updated, run_going=_runner().status == "running")
+
+
+def _log_settings_change(before: dict, after: dict) -> None:
+    import logging
+    log = logging.getLogger("coopa_trada.web.settings")
+    skip = {"settings_summary", "settings_error", "setting_confirmations"}
+    changed = [f"{k}: {before.get(k)!r} -> {after.get(k)!r}" for k in sorted(set(before) | set(after))
+               if k not in skip and before.get(k) != after.get(k)]
+    log.info("settings saved; %s", "; ".join(changed) if changed else "nothing changed")
 
 
 # -- trade log --------------------------------------------------------
